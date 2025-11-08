@@ -1,0 +1,6 @@
+e2e/
+test-results/
+**/*.spec.ts
+**/*.spec.tsx
+.DS_Store
+
