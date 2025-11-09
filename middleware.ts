@@ -7,34 +7,6 @@ const PROTECTED_ROUTES = ["/orders", "/results", "/settings"]
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
-  // Early guard: Block test API routes in Vercel production
-  if (process.env.VERCEL_ENV === "production" && pathname.startsWith("/api/test/")) {
-    return new Response("Not Found", { status: 404 })
-  }
-
-  // Block test API routes in production
-  if (process.env.NODE_ENV === "production") {
-    if (pathname.startsWith("/api/test/")) {
-      return NextResponse.json({ error: "Not found" }, { status: 404 })
-    }
-
-    // Remove test/admin query parameters in production to prevent backdoor access
-    const url = request.nextUrl.clone()
-    const testParams = ["e2e", "seed", "admin", "debug", "test"]
-    let hasTestParams = false
-
-    testParams.forEach((param) => {
-      if (url.searchParams.has(param)) {
-        url.searchParams.delete(param)
-        hasTestParams = true
-      }
-    })
-
-    if (hasTestParams) {
-      return NextResponse.redirect(url)
-    }
-  }
-
   const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
 
   // Dev-only: Allow E2E test cookie bypass for protected routes
@@ -75,10 +47,10 @@ export async function middleware(request: NextRequest) {
       } = await supabase.auth.getUser()
 
       if (!user) {
-        // Redirect to login if not authenticated
+        // Redirect to login if not authenticated (307 Temporary Redirect)
         const loginUrl = new URL("/auth/login", request.url)
         loginUrl.searchParams.set("redirect", pathname)
-        return NextResponse.redirect(loginUrl)
+        return NextResponse.redirect(loginUrl, { status: 307 })
       }
     } catch (error) {
       // If Supabase is not configured, allow access (for development)
@@ -91,14 +63,8 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    /*
-     * Match all request paths except for the ones starting with:
-     * - api (API routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     */
-    "/((?!api|_next/static|_next/image|favicon.ico).*)",
+    // ✅ 完全排除 API 與靜態資源
+    "/((?!_next/static|_next/image|favicon.ico|api/).*)",
   ],
 }
 

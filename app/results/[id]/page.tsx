@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams, useRouter, useParams } from "next/navigation"
 import { Navigation } from "@/components/navigation"
@@ -23,7 +24,7 @@ interface ResultsResponse {
   createdAt: string
 }
 
-export default function ResultsPage() {
+function ResultsContent() {
   const params = useParams<{ id?: string }>()
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -321,5 +322,17 @@ export default function ResultsPage() {
       </main>
       <Footer />
     </div>
+  )
+}
+
+export default function ResultsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    }>
+      <ResultsContent />
+    </Suspense>
   )
 }

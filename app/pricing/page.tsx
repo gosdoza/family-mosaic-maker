@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -12,7 +13,7 @@ import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
 import { trackMetric } from "@/lib/metrics"
 
-export default function PricingCheckout() {
+function PricingContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const job = searchParams.get("job")
@@ -262,5 +263,17 @@ export default function PricingCheckout() {
 
       <Footer />
     </div>
+  )
+}
+
+export default function PricingCheckout() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    }>
+      <PricingContent />
+    </Suspense>
   )
 }

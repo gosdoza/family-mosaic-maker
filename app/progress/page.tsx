@@ -1,9 +1,10 @@
 "use client"
 
+import { Suspense } from "react"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { Card } from "@/components/ui/card"
-import { Sparkles } from "lucide-react"
+import { Sparkles, Loader2 } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 
@@ -14,7 +15,7 @@ interface ProgressResponse {
   message?: string
 }
 
-export default function ProgressPage() {
+function ProgressContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const jobId = searchParams.get("job")
@@ -154,5 +155,17 @@ export default function ProgressPage() {
 
       <Footer />
     </div>
+  )
+}
+
+export default function ProgressPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    }>
+      <ProgressContent />
+    </Suspense>
   )
 }

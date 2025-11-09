@@ -1,5 +1,6 @@
 "use client"
 
+import { Suspense } from "react"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { Button } from "@/components/ui/button"
@@ -25,7 +26,7 @@ interface ResultsResponse {
   createdAt: string
 }
 
-export default function ResultsPage() {
+function ResultsContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const id = searchParams.get("id")
@@ -598,5 +599,17 @@ export default function ResultsPage() {
 
       <Footer />
     </div>
+  )
+}
+
+export default function ResultsPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    }>
+      <ResultsContent />
+    </Suspense>
   )
 }

@@ -1,6 +1,7 @@
 "use client"
 
 import type React from "react"
+import { Suspense } from "react"
 
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
@@ -30,7 +31,7 @@ const TEMPLATE_COLLECTIONS: Template[] = [
   { id: "reunion", name: "Family Reunion", emoji: "👨‍👩‍👧‍👦", description: "Joyful gatherings" },
 ]
 
-export default function GeneratePage() {
+function GenerateContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const [currentStep, setCurrentStep] = useState(1)
@@ -299,5 +300,17 @@ export default function GeneratePage() {
 
       <Footer />
     </div>
+  )
+}
+
+export default function GeneratePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin" />
+      </div>
+    }>
+      <GenerateContent />
+    </Suspense>
   )
 }

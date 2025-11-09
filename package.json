@@ -17,6 +17,13 @@
     "health:check": "./scripts/health-check.sh",
     "verify:env": "./scripts/verify-env.sh",
     "setup:db": "./scripts/setup-db.sh",
+    "env:guide": "tsx scripts/print-vercel-env-guide.ts",
+    "vercel:env:auto": "bash ./scripts/setup-vercel-env-auto.sh",
+    "vercel:env:quick": "bash ./scripts/setup-vercel-env-quick.sh",
+    "vercel:env:setup": "bash ./scripts/setup-vercel-env.sh",
+    "vercel:preview:redeploy": "vercel --prebuilt --prod=false --yes",
+    "vercel:prod:redeploy": "vercel --prebuilt --prod --yes",
+    "test:auth:nonmock": "cross-env NEXT_PUBLIC_USE_MOCK=false playwright test e2e/auth-protection-nonmock.spec.ts",
     "postinstall": "npx playwright install --with-deps || echo 'Playwright browsers already installed'"
   },
   "dependencies": {
@@ -80,8 +87,10 @@
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
     "postcss": "^8.5",
     "tailwindcss": "^4.1.9",
+    "tsx": "^4.20.6",
     "tw-animate-css": "1.3.3",
     "typescript": "^5"
   },

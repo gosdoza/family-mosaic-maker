@@ -28,7 +28,43 @@ Configure Supabase Redirect URLs in your Supabase Dashboard:
 
 Where `{DOMAIN}` is your Vercel deployment URL (e.g., `https://your-app.vercel.app`)
 
+**📚 Full Guide:** See [Supabase Auth URL Configuration](./docs/deploy/supabase-auth-urls.md) for detailed setup instructions.
+
 ### Required Environment Variables
 
 See `.env.local.example` for the complete list of required environment variables.
+
+## Authentication
+
+### Local Verification
+
+Before deploying, verify that the authentication callback route works locally:
+
+1. Start the development server:
+   ```bash
+   pnpm dev
+   ```
+
+2. Open the callback page in your browser:
+   ```
+   http://localhost:3000/auth/callback?code=dev-ok
+   ```
+
+3. You should see a "Callback OK" page with the code parameter displayed.
+
+4. If the page renders correctly, the route is configured properly.
+
+### Supabase Configuration
+
+**📚 Complete Guide:** See [Supabase Auth URL Configuration Guide](./docs/deploy/supabase-auth-urls.md) for:
+- Step-by-step Supabase Dashboard configuration
+- Development, Preview, and Production URL setup
+- Troubleshooting tips
+- Quick reference checklist
+
+**Quick Setup Checklist:**
+- [ ] Site URL set to `http://localhost:3000` (for development)
+- [ ] `http://localhost:3000/auth/callback` added to Redirect URLs
+- [ ] Preview domain pattern added: `https://family-mosaic-maker-*.vercel.app/auth/callback`
+- [ ] Production domain added when ready: `https://family-mosaic-maker.vercel.app/auth/callback`
 

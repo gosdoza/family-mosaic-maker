@@ -1,0 +1,91 @@
+# Page snapshot
+
+```yaml
+- generic [active] [ref=e1]:
+  - generic [ref=e2]:
+    - navigation [ref=e3]:
+      - generic [ref=e5]:
+        - link "Family Mosaic Maker" [ref=e6] [cursor=pointer]:
+          - /url: /
+          - img [ref=e7]
+          - generic [ref=e9]: Family Mosaic Maker
+        - generic [ref=e10]:
+          - link "Generate" [ref=e11] [cursor=pointer]:
+            - /url: /generate
+          - link "Pricing" [ref=e12] [cursor=pointer]:
+            - /url: /pricing
+          - link "Orders" [ref=e13] [cursor=pointer]:
+            - /url: /orders
+          - link "Help" [ref=e14] [cursor=pointer]:
+            - /url: /help
+          - link "Sign In" [ref=e15] [cursor=pointer]:
+            - /url: /auth/login
+            - button "Sign In" [ref=e16]
+    - main [ref=e17]:
+      - generic [ref=e18]:
+        - generic [ref=e19]:
+          - generic [ref=e20]:
+            - heading "Your Orders" [level=1] [ref=e21]
+            - paragraph [ref=e22]: Access all your generated family mosaics
+          - generic [ref=e23]:
+            - button "All" [ref=e24]
+            - button "Completed" [ref=e25]
+            - button "Processing" [ref=e26]
+        - generic [ref=e27]:
+          - generic [ref=e30]:
+            - img "Order ORD-001" [ref=e32]
+            - generic [ref=e33]:
+              - generic [ref=e34]:
+                - generic [ref=e35]:
+                  - generic [ref=e36]:
+                    - heading "ORD-001" [level=3] [ref=e37]
+                    - generic [ref=e38]: 🎄
+                  - paragraph [ref=e39]: January 15, 2025
+                - generic [ref=e40]:
+                  - generic [ref=e41]: Completed
+                  - generic [ref=e42]: Paid
+              - generic [ref=e43]:
+                - generic [ref=e44]: Christmas
+                - generic [ref=e45]: 4 variations
+              - link "View Results" [ref=e46] [cursor=pointer]:
+                - /url: /results?id=ORD-001
+                - img [ref=e47]
+                - text: View Results
+          - generic [ref=e52]:
+            - img "Order ORD-002" [ref=e54]
+            - generic [ref=e55]:
+              - generic [ref=e56]:
+                - generic [ref=e57]:
+                  - generic [ref=e58]:
+                    - heading "ORD-002" [level=3] [ref=e59]
+                    - generic [ref=e60]: 🎂
+                  - paragraph [ref=e61]: January 10, 2025
+                - generic [ref=e62]:
+                  - generic [ref=e63]: Completed
+                  - generic [ref=e64]: Unpaid
+              - generic [ref=e65]:
+                - generic [ref=e66]: Birthday
+                - generic [ref=e67]: 3 variations
+              - link "View Results" [ref=e68] [cursor=pointer]:
+                - /url: /results?id=ORD-002
+                - img [ref=e69]
+                - text: View Results
+    - contentinfo [ref=e72]:
+      - generic [ref=e74]:
+        - paragraph [ref=e75]:
+          - text: Made with
+          - img [ref=e76]
+          - text: by Family Mosaic Maker
+        - generic [ref=e78]:
+          - link "Privacy Policy" [ref=e79] [cursor=pointer]:
+            - /url: /help
+          - link "Refund Policy" [ref=e80] [cursor=pointer]:
+            - /url: /help
+          - link "Settings" [ref=e81] [cursor=pointer]:
+            - /url: /settings
+  - region "Notifications (F8)":
+    - list
+  - button "Open Next.js Dev Tools" [ref=e87] [cursor=pointer]:
+    - img [ref=e88]
+  - alert [ref=e91]
+```
