@@ -65,7 +65,7 @@ export async function GET(request: NextRequest) {
 
     if (useMock) {
       // Return mock orders for testing (fallback)
-      // 確保包含 demo-001 的訂單（用於 QA 測試）
+      // 確保包含 demo-001 的訂單（用於 QA 測試），狀態為 paid
       const mockOrders = [
         {
           id: "ORD-001",
@@ -80,7 +80,7 @@ export async function GET(request: NextRequest) {
             { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
             { id: 3, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
           ],
-          paymentStatus: "unpaid",
+          paymentStatus: "paid", // demo-001 訂單標記為已付費（用於 QA 測試）
         },
         {
           id: "ORD-002",

@@ -150,8 +150,12 @@ export async function POST(request: NextRequest) {
           },
         })
 
+        // 使用 request URL 的 origin 構建完整的 approvalUrl（避免硬編碼 domain）
+        const requestUrl = new URL(request.url)
+        const approvalUrl = `${requestUrl.origin}/results?id=${jobId}&paid=1`
+
         return NextResponse.json({
-          approvalUrl: `/results?id=${jobId}&paid=1`,
+          approvalUrl,
           orderId: order.id,
           jobId,
           request_id: requestId,
@@ -174,8 +178,12 @@ export async function POST(request: NextRequest) {
         },
       })
 
+      // 使用 request URL 的 origin 構建完整的 approvalUrl（避免硬編碼 domain）
+      const requestUrl = new URL(request.url)
+      const approvalUrl = `${requestUrl.origin}/results?id=${jobId}&paid=1`
+
       return NextResponse.json({
-        approvalUrl: `/results?id=${jobId}&paid=1`,
+        approvalUrl,
         orderId,
         jobId,
         request_id: requestId,
