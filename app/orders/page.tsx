@@ -196,7 +196,7 @@ export default function OrdersPage() {
                             {order.status === "Completed" || order.status === "completed" ? (
                               <a
                                 {...(process.env.NODE_ENV !== "production" ? { "data-testid": "order-view-link" } : {})}
-                                href={`/results?id=${order.jobId || order.id}`}
+                                href={`/results?id=${order.jobId || order.id}${order.paymentStatus === "paid" ? "&paid=1" : ""}`}
                                 className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4"
                               >
                                 <Download className="w-4 h-4 mr-2" />

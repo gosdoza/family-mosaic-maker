@@ -30,6 +30,7 @@
     "qa:check-vercel-env": "node scripts/qa/check-vercel-env.mjs",
     "qa:mvp-generate-flow": "node scripts/qa/mvp-generate-flow.mjs",
     "qa:mvp-pricing-flow": "node scripts/qa/mvp-pricing-flow.mjs",
+    "qa:mvp-orders-flow": "node scripts/qa/mvp-orders-flow.mjs",
     "qa:final-report": "bash scripts/qa/generate-final-report.sh",
     "qa:final-report:complete": "bash scripts/qa/generate-final-report-complete.sh",
     "qa:smoke-preview": "bash scripts/qa/generate-smoke-preview-report.sh",
