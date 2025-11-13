@@ -69,7 +69,6 @@ export async function GET(
 
         // 记录 results_ok 事件
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-        const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
         const falApiKey = process.env.FAL_API_KEY
         const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
         const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
@@ -151,7 +150,6 @@ export async function GET(
 
         // 记录 results_ok 事件
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-        const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
         const falApiKey = process.env.FAL_API_KEY
         const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
         const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
@@ -277,7 +275,6 @@ export async function GET(
 
     // 记录 results_ok 事件
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-    const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
     const falApiKey = process.env.FAL_API_KEY
     const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
     const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
