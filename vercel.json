@@ -1,24 +1,3 @@
 {
-  "crons": [
-    {
-      "path": "/api/analytics/ga4/export",
-      "schedule": "0 1 * * *"
-    },
-    {
-      "path": "/api/gdpr/process",
-      "schedule": "0 */6 * * *"
-    },
-    {
-      "path": "/api/degradation/detect",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/incident/check",
-      "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/degradation/cost-guard",
-      "schedule": "*/5 * * * *"
-    }
-  ]
+  "$schema": "https://openapi.vercel.sh/vercel.json"
 }
