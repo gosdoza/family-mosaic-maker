@@ -65,31 +65,35 @@ export async function GET(request: NextRequest) {
 
     if (useMock) {
       // Return mock orders for testing (fallback)
+      // 確保包含 demo-001 的訂單（用於 QA 測試）
       const mockOrders = [
         {
           id: "ORD-001",
-          date: "2025-01-15",
+          date: new Date().toISOString().split("T")[0],
           status: "Completed",
-          thumbnail: "/family-christmas-photo.jpg",
-          count: 4,
+          thumbnail: "/assets/mock/family1.jpg",
+          count: 3,
           template: "Christmas",
+          jobId: "demo-001",
           images: [
             { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
             { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+            { id: 3, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
           ],
-          paymentStatus: "paid",
+          paymentStatus: "unpaid",
         },
         {
           id: "ORD-002",
           date: "2025-01-10",
           status: "Completed",
-          thumbnail: "/family-birthday-photo.jpg",
-          count: 3,
+          thumbnail: "/assets/mock/family2.jpg",
+          count: 2,
           template: "Birthday",
           images: [
             { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+            { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
           ],
-          paymentStatus: "unpaid",
+          paymentStatus: "paid",
         },
       ]
       return NextResponse.json({ orders: mockOrders })

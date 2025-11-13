@@ -36,7 +36,12 @@ export async function GET(
       if (!job) {
         // Fallback to mock results data for testing
         // Check for paid order even if job doesn't exist in store
-        const paid = [...e2eStore.orders.values()].some(
+        // 特殊處理：demo-001 支援 paid=1 query（用於 QA 測試）
+        const requestUrl = new URL(request.url)
+        const paidParam = requestUrl.searchParams.get("paid")
+        const paidFromQuery = paidParam === "1" || paidParam === "true"
+        
+        const paid = paidFromQuery || [...e2eStore.orders.values()].some(
           (o) => o.job_id === jobId && o.status === "paid"
         )
 

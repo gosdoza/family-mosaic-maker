@@ -59,7 +59,13 @@ function ResultsContent() {
         setLoading(true)
         setError(null)
 
-        const res = await fetch(`/api/results/${id}`, {
+        // 檢查 URL 是否有 paid=1 參數，如果有則傳遞給 API
+        const paidParam = searchParams.get("paid")
+        const apiUrl = paidParam 
+          ? `/api/results/${id}?paid=${paidParam}`
+          : `/api/results/${id}`
+
+        const res = await fetch(apiUrl, {
           method: "GET",
           headers: { "Cache-Control": "no-cache" },
         })

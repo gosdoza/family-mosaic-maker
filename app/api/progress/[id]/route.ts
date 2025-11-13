@@ -34,6 +34,16 @@ export async function GET(
     const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
 
     if (useMock) {
+      // 特殊處理：demo-001 直接返回完成狀態（用於 QA 測試）
+      if (jobId === "demo-001") {
+        return NextResponse.json({
+          jobId,
+          status: "succeeded",
+          progress: 100,
+          message: "Generation complete!",
+        })
+      }
+
       // Mock 模式：使用状态机模拟进度
       let job = mockJobStore.get(jobId)
       

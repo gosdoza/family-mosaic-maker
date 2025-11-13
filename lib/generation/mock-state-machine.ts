@@ -69,10 +69,23 @@ export function updateMockJobState(job: MockJobState): MockJobState {
 
 /**
  * 生成 Mock 预览图 URL
+ * 
+ * 優先使用本地 mock 圖片（public/assets/mock/），
+ * 如果數量不足則使用占位符服務作為 fallback
  */
 export function generateMockPreviewUrls(count: number = 3): string[] {
+  // 本地 mock 圖片列表
+  const localMockImages = [
+    "/assets/mock/family1.jpg",
+    "/assets/mock/family2.jpg",
+  ]
+  
   return Array.from({ length: count }, (_, i) => {
-    // 使用占位图服务或本地 mock 图片
+    // 優先使用本地圖片（循環使用）
+    if (i < localMockImages.length) {
+      return localMockImages[i]
+    }
+    // 如果需要的數量超過本地圖片，使用占位符服務
     return `https://picsum.photos/1024/1024?random=${Date.now()}-${i}`
   })
 }
