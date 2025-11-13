@@ -28,11 +28,42 @@ export default function ProgressPage() {
   const [error, setError] = useState<string | null>(null)
   const [simulatedProgress, setSimulatedProgress] = useState(0)
 
-  // In mock mode, immediately redirect to results
+  // In mock mode, poll progress and redirect when succeeded
   useEffect(() => {
-    if (isMock && jobId) {
-      router.push(`/results/${jobId}`)
-      return
+    if (!isMock || !jobId) return
+
+    let canceled = false
+    let pollCount = 0
+    const maxPolls = 60 // 最多轮询 60 次（90 秒）
+
+    const pollInterval = setInterval(async () => {
+      if (canceled || pollCount >= maxPolls) {
+        clearInterval(pollInterval)
+        return
+      }
+
+      pollCount++
+
+      try {
+        const response = await fetch(`/api/progress/${jobId}`)
+        if (!response.ok) return
+
+        const data: ProgressResponse = await response.json()
+        
+        if (data.status === "succeeded") {
+          clearInterval(pollInterval)
+          if (!canceled) {
+            router.push(`/results/${jobId}`)
+          }
+        }
+      } catch (error) {
+        console.error("Error polling progress:", error)
+      }
+    }, 1500) // 每 1.5 秒轮询一次
+
+    return () => {
+      canceled = true
+      clearInterval(pollInterval)
     }
   }, [isMock, jobId, router])
 
@@ -82,7 +113,7 @@ export default function ProgressPage() {
   useEffect(() => {
     if (isMock || !jobId) return
 
-    const t = setInterval(() => setTick((x) => x + 1), 1200)
+    const t = setInterval(() => setTick((x) => x + 1), 1500) // 每 1.5 秒轮询一次
     return () => clearInterval(t)
   }, [isMock, jobId])
 

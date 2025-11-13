@@ -3,6 +3,7 @@ import { IS_MOCK, PAYPAL_WEBHOOK_ID } from "@/lib/config"
 import { recordWebhookEvent, hasWebhookEventBeenProcessed } from "@/lib/orders"
 import { verifyPayPalWebhookSignature } from "@/lib/paypal-webhook"
 import { createClient } from "@/lib/supabase/server"
+import { createClient as createServiceClient } from "@supabase/supabase-js"
 
 export async function POST(request: NextRequest) {
   try {
@@ -116,18 +117,55 @@ export async function POST(request: NextRequest) {
         )
       }
 
-      // Optionally set job flag paid=true for quick checks
-      // Note: This assumes jobs table has a 'paid' boolean column
-      // If not, you can skip this step or add the column via migration
-      const { error: jobUpdateError } = await supabase
-        .from("jobs")
-        .update({ paid: true, updated_at: new Date().toISOString() })
-        .eq("id", jobId)
+      // 更新 assets.paid=true（解锁资产）
+      const { error: assetsUpdateError } = await supabase
+        .from("assets")
+        .update({ paid: true })
+        .eq("job_id", jobId)
 
-      if (jobUpdateError) {
-        // Log but don't fail - this is optional
-        console.warn("Failed to update job paid flag (optional):", jobUpdateError)
+      if (assetsUpdateError) {
+        console.warn("Failed to update assets paid flag:", assetsUpdateError)
       }
+
+      // 检查用户是否在线（通过检查最近的会话）
+      // 如果用户掉线，需要补发凭证
+      const { data: recentSession } = await supabase
+        .from("analytics_logs")
+        .select("user_id, created_at")
+        .eq("user_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      const userOffline = !recentSession || 
+        (Date.now() - new Date(recentSession.created_at).getTime()) > 5 * 60 * 1000 // 5 分钟无活动视为掉线
+
+      if (userOffline) {
+        // 补发凭证（记录到 analytics_logs）
+        await logAnalyticsEvent({
+          event_type: "webhook_reissue",
+          user_id: userId,
+          data: {
+            job_id: jobId,
+            order_id: order?.id,
+            capture_id: captureId,
+            reason: "user_offline",
+          },
+        })
+      }
+
+      // 记录 webhook_ok 事件
+      await logAnalyticsEvent({
+        event_type: "webhook_ok",
+        user_id: userId,
+        data: {
+          job_id: jobId,
+          order_id: order?.id,
+          capture_id: captureId,
+          event_id: eventId,
+          user_offline: userOffline,
+        },
+      })
 
       console.log(`PayPal payment completed: ${eventType}, job: ${jobId}, order: ${order?.id}`)
     }
@@ -143,5 +181,37 @@ export async function POST(request: NextRequest) {
       { error: "Failed to process webhook", success: false },
       { status: 200 }
     )
+  }
+}
+
+/**
+ * 记录 analytics_logs 事件
+ */
+async function logAnalyticsEvent(event: {
+  event_type: string
+  user_id: string
+  data?: any
+}) {
+  try {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    )
+
+    await serviceClient.from("analytics_logs").insert({
+      event_type: event.event_type,
+      event_data: event.data || {},
+      user_id: event.user_id,
+      created_at: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("Failed to log analytics event:", error)
+    // 不抛出错误，避免影响主流程
   }
 }

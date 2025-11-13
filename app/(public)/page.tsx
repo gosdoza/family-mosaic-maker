@@ -7,6 +7,7 @@ import { Card } from "@/components/ui/card"
 import { Sparkles, Users, Heart, Zap, Shield, Award, Star } from "lucide-react"
 import Link from "next/link"
 import { motion } from "framer-motion"
+import { t } from "@/lib/i18n-client"
 
 const TEMPLATES = [
   { id: "christmas", name: "Christmas", emoji: "🎄", image: "/christmas-family-photo-cozy-warm-lights.jpg" },
@@ -89,24 +90,21 @@ export default function Home() {
                 variants={fadeUpVariants}
               >
                 <Sparkles className="w-4 h-4 text-primary" />
-                <span className="text-sm font-medium">AI-Powered Family Moments</span>
+                <span className="text-sm font-medium">{t("hero.tagline")}</span>
               </motion.div>
 
               <motion.h1
                 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-balance"
                 variants={fadeUpVariants}
               >
-                Turn Memories Into{" "}
-                <span className="bg-gradient-to-r from-primary via-accent to-primary bg-clip-text text-transparent gradient-animate">
-                  Family Moments
-                </span>
+                {t("hero.title")}
               </motion.h1>
 
               <motion.p
                 className="text-xl sm:text-2xl text-muted-foreground max-w-2xl mx-auto text-pretty"
                 variants={fadeUpVariants}
               >
-                Transform single portraits into beautiful AI-generated family photos
+                {t("hero.subtitle")}
               </motion.p>
 
               <motion.div
@@ -116,12 +114,12 @@ export default function Home() {
                 <Link href="/generate">
                   <Button size="lg" className="rounded-full text-lg px-8 h-14 shadow-lg hover:shadow-xl transition-all">
                     <Sparkles className="w-5 h-5 mr-2" />
-                    Generate Now
+                    {t("cta.generateNow")}
                   </Button>
                 </Link>
                 <Link href="/generate">
                   <Button size="lg" variant="outline" className="rounded-full text-lg px-8 h-14 glass bg-transparent">
-                    Get Started
+                    {t("cta.getStarted")}
                   </Button>
                 </Link>
               </motion.div>
@@ -369,7 +367,7 @@ export default function Home() {
               <Link href="/generate">
                 <Button size="lg" className="rounded-full text-lg px-8 h-14 shadow-lg hover:shadow-xl transition-all">
                   <Sparkles className="w-5 h-5 mr-2" />
-                  Generate Now
+                  {t("cta.generateNow")}
                 </Button>
               </Link>
             </motion.div>

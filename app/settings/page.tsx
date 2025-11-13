@@ -7,14 +7,50 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { User, Globe, Moon, Loader2 } from "lucide-react"
-import { useState } from "react"
+import { User, Globe, Moon, Loader2, Activity } from "lucide-react"
+import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/useAuth"
+import { getLocale, setLocale } from "@/lib/i18n"
+import { t } from "@/lib/i18n-client"
+
+interface AnalyticsEvent {
+  event_type: string
+  request_id: string | null
+  created_at: string
+  summary: string
+}
 
 export default function SettingsPage() {
-  const [language, setLanguage] = useState("en")
+  const [language, setLanguage] = useState<"en" | "zh" | "ja">("en")
   const [darkMode, setDarkMode] = useState(false)
+  const [events, setEvents] = useState<AnalyticsEvent[]>([])
+  const [loadingEvents, setLoadingEvents] = useState(false)
   const { user, loading } = useAuth(true)
+
+  useEffect(() => {
+    setLanguage(getLocale())
+  }, [])
+
+  useEffect(() => {
+    if (user) {
+      loadEvents()
+    }
+  }, [user])
+
+  const loadEvents = async () => {
+    setLoadingEvents(true)
+    try {
+      const response = await fetch("/api/analytics/events")
+      if (response.ok) {
+        const data = await response.json()
+        setEvents(data.events || [])
+      }
+    } catch (error) {
+      console.error("Failed to load events:", error)
+    } finally {
+      setLoadingEvents(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -80,13 +116,16 @@ export default function SettingsPage() {
 
               <div className="flex flex-wrap gap-3">
                 {[
-                  { code: "en", label: "EN" },
-                  { code: "zh", label: "中文" },
-                  { code: "ja", label: "日本語" },
+                  { code: "en" as const, label: "EN" },
+                  { code: "zh" as const, label: "中文" },
+                  { code: "ja" as const, label: "日本語" },
                 ].map((lang) => (
                   <button
                     key={lang.code}
-                    onClick={() => setLanguage(lang.code)}
+                    onClick={() => {
+                      setLanguage(lang.code)
+                      setLocale(lang.code)
+                    }}
                     className={`px-6 py-3 rounded-full transition-all ${
                       language === lang.code ? "bg-primary text-primary-foreground" : "glass hover:scale-105"
                     }`}
@@ -109,6 +148,46 @@ export default function SettingsPage() {
                 </div>
                 <Switch checked={darkMode} onCheckedChange={setDarkMode} />
               </div>
+            </Card>
+
+            {/* Event Diagnostics Section */}
+            <Card className="p-6 glass">
+              <div className="flex items-center gap-3 mb-6">
+                <Activity className="w-5 h-5 text-primary" />
+                <h2 className="text-xl font-semibold">Event Diagnostics</h2>
+              </div>
+
+              {loadingEvents ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                </div>
+              ) : events.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">
+                  No events found. Upload some files to see events here.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {events.map((event, idx) => (
+                    <div
+                      key={idx}
+                      className="p-4 rounded-lg bg-background/50 border border-border"
+                    >
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="font-semibold text-sm">{event.event_type}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {new Date(event.created_at).toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{event.summary}</p>
+                      {event.request_id && (
+                        <p className="text-xs text-muted-foreground mt-1 font-mono">
+                          ID: {event.request_id}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           </div>
         </div>

@@ -26,10 +26,15 @@ export default function AuthPage() {
     setLoading(true)
 
     try {
+      // 使用当前 origin 作为 redirect URL（客户端组件中无法访问服务器端环境变量）
+      // 确保在 Vercel 上使用正确的域名，本地开发使用 localhost
+      const emailRedirectTo = `${window.location.origin}/auth/callback`
+
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
+          emailRedirectTo,
+          shouldCreateUser: true, // 允许自动创建新用户
         },
       })
 

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
+import { logAnalyticsEvent } from "@/lib/analytics/client"
 
 interface MetricPayload {
   event: string
+  request_id?: string
   jobId?: string
   orderId?: string
   metadata?: Record<string, any>
@@ -18,22 +20,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Log metric event (in production, you might send to analytics service)
-    console.log("[METRIC]", {
-      event: body.event,
-      jobId: body.jobId,
-      orderId: body.orderId,
-      metadata: body.metadata,
-      timestamp: new Date().toISOString(),
+    // 记录到 analytics（Supabase + Logflare）
+    await logAnalyticsEvent({
+      event_type: body.event,
+      request_id: body.request_id,
+      job_id: body.jobId,
+      order_id: body.orderId,
+      data: body.metadata,
     })
-
-    // TODO: In production, send to analytics service (e.g., PostHog, Mixpanel, etc.)
-    // Example:
-    // await analytics.track(body.event, {
-    //   jobId: body.jobId,
-    //   orderId: body.orderId,
-    //   ...body.metadata,
-    // })
 
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (error) {

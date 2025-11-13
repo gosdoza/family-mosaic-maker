@@ -10,6 +10,10 @@ Supabase requires you to configure allowed redirect URLs in the Supabase Dashboa
 
 ### 1. Navigate to Supabase Dashboard
 
+**直接链接（如果已配置项目）:**
+- [Supabase Auth Settings](https://supabase.com/dashboard/project/mxdexoahfmwbqwngzzsf/settings/auth)
+
+**手动导航:**
 1. Go to [Supabase Dashboard](https://supabase.com/dashboard)
 2. Select your project
 3. Click on **Authentication** in the left sidebar
@@ -20,8 +24,8 @@ Supabase requires you to configure allowed redirect URLs in the Supabase Dashboa
 **For Development:**
 - **Site URL**: `http://localhost:3000`
 
-**For Production (when ready):**
-- **Site URL**: `https://family-mosaic-maker.vercel.app` (or your custom domain)
+**For Production:**
+- **Site URL**: `https://family-mosaic-maker.vercel.app` ✅ **已设置** (最后更新: 2025-11-09)
 
 ### 3. Configure Redirect URLs (Allow List)
 
@@ -37,20 +41,21 @@ Add the following URLs to the **Redirect URLs** list:
 
 **Note:** The `*` wildcard matches any preview deployment URL (e.g., `https://family-mosaic-maker-abc123.vercel.app`)
 
-#### Production (when ready)
+#### Production ✅ **已设置** (最后更新: 2025-11-09)
 - ✅ `https://family-mosaic-maker.vercel.app/auth/callback`
-- ✅ `https://family-mosaic-maker.vercel.app/*`
-- ✅ `https://your-custom-domain.com/auth/callback` (if using custom domain)
+- ✅ `https://family-mosaic-maker-*.vercel.app/auth/callback` (Preview 部署通配符)
+- ✅ `https://family-mosaic-maker.vercel.app/*` (可选，用于其他回调路径)
 
 ### 4. Complete Configuration Checklist
 
 Use this checklist to ensure all URLs are configured:
 
-- [ ] Site URL set to `http://localhost:3000` (for development)
-- [ ] `http://localhost:3000` added to Redirect URLs
-- [ ] `http://localhost:3000/auth/callback` added to Redirect URLs
-- [ ] Preview domain pattern added: `https://family-mosaic-maker-*.vercel.app/auth/callback`
-- [ ] Production domain added: `https://family-mosaic-maker.vercel.app/auth/callback` (when ready)
+- [x] Site URL set to `https://family-mosaic-maker.vercel.app` (Production) ✅ **已设置** (2025-11-09)
+- [x] Site URL set to `http://localhost:3000` (for development)
+- [x] `http://localhost:3000` added to Redirect URLs
+- [x] `http://localhost:3000/auth/callback` added to Redirect URLs
+- [x] Preview domain pattern added: `https://family-mosaic-maker-*.vercel.app/auth/callback` ✅ **已设置** (2025-11-09)
+- [x] Production domain added: `https://family-mosaic-maker.vercel.app/auth/callback` ✅ **已设置** (2025-11-09)
 - [ ] Custom domain added (if applicable)
 
 ## Screenshots Reference
@@ -76,20 +81,32 @@ Use this checklist to ensure all URLs are configured:
 [Placeholder: Screenshot showing Redirect URLs list with multiple entries]
 ```
 
+## Current Configuration Status ✅
+
+**Last Updated: 2025-11-09**
+
+### Site URL
+- ✅ **Production**: `https://family-mosaic-maker.vercel.app` (已设置)
+
+### Redirect URLs
+- ✅ `https://family-mosaic-maker.vercel.app/auth/callback` (Production)
+- ✅ `https://family-mosaic-maker-*.vercel.app/auth/callback` (Preview 通配符)
+- ✅ `http://localhost:3000/auth/callback` (Development)
+
 ## Switching from Development to Production
 
 When you're ready to deploy to production:
 
 1. **Update Site URL:**
-   - Change from `http://localhost:3000` to `https://family-mosaic-maker.vercel.app`
+   - Change from `http://localhost:3000` to `https://family-mosaic-maker.vercel.app` ✅ **已完成**
 
 2. **Keep Preview URLs:**
-   - Keep preview deployment URLs in the Redirect URLs list
+   - Keep preview deployment URLs in the Redirect URLs list ✅ **已完成**
    - This allows both preview and production deployments to work
 
 3. **Add Production URLs:**
-   - Add `https://family-mosaic-maker.vercel.app/auth/callback` to Redirect URLs
-   - Add your custom domain if applicable
+   - Add `https://family-mosaic-maker.vercel.app/auth/callback` to Redirect URLs ✅ **已完成**
+   - Add preview wildcard pattern: `https://family-mosaic-maker-*.vercel.app/auth/callback` ✅ **已完成**
 
 ## Local Verification
 
@@ -134,6 +151,7 @@ Before deploying, verify that the callback route works locally:
 - [Supabase Auth Documentation](https://supabase.com/docs/guides/auth)
 - [Vercel Environment Variables Guide](./env-checklist.md)
 - [Local Development Setup](../../README.md#auth)
+- [Supabase Auth 配置状态](./supabase-auth-config-status.md) - 当前配置状态和验证步骤
 
 ## Quick Reference
 
@@ -147,6 +165,8 @@ Dashboard → Your Project → Authentication → URL Configuration
 - Redirect URLs: `http://localhost:3000`, `http://localhost:3000/auth/callback`
 
 **Required URLs for Production:**
-- Site URL: `https://family-mosaic-maker.vercel.app`
-- Redirect URLs: `https://family-mosaic-maker.vercel.app/auth/callback`, `https://family-mosaic-maker-*.vercel.app/auth/callback`
+- Site URL: `https://family-mosaic-maker.vercel.app` ✅ **已设置** (2025-11-09)
+- Redirect URLs: 
+  - ✅ `https://family-mosaic-maker.vercel.app/auth/callback` (已设置)
+  - ✅ `https://family-mosaic-maker-*.vercel.app/auth/callback` (已设置，Preview 通配符)
 

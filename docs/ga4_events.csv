@@ -1,0 +1,40 @@
+event_name,parameter_name,parameter_type,required,description,example_value
+page_view,page_path,string,true,页面路径,/generate
+page_view,page_title,string,false,页面标题,Family Mosaic Maker
+generate_start,job_id,string,true,任务 ID,job_1234567890_abc
+generate_start,model_provider,string,true,模型供应商（fal/mock/degraded）,fal
+generate_start,model_id,string,false,模型 ID（如 fal-ai/flux/schnell）,fal-ai/flux/schnell
+generate_start,style,string,false,生成风格（realistic/anime/vintage）,realistic
+generate_start,template,string,false,模板名称（christmas/birthday/wedding）,christmas
+generate_success,job_id,string,true,任务 ID,job_1234567890_abc
+generate_success,model_provider,string,true,模型供应商（fal/mock/degraded）,fal
+generate_success,model_id,string,false,模型 ID（如 fal-ai/flux/schnell）,fal-ai/flux/schnell
+generate_success,mode,string,false,生成模式（fal/mock/degraded）,fal
+generate_fail,job_id,string,true,任务 ID,job_1234567890_abc
+generate_fail,error_message,string,false,错误信息,E_MODEL_MISCONFIG
+generate_fail,error_code,string,false,错误代码,E_MODEL_MISCONFIG
+generate_fail,model_provider,string,false,模型供应商（fal/mock/degraded）,fal
+generate_fail,model_id,string,false,模型 ID（如 fal-ai/flux/schnell）,fal-ai/flux/schnell
+payment_start,job_id,string,true,任务 ID,job_1234567890_abc
+payment_start,value,number,false,支付金额（美元）,2.99
+payment_start,currency,string,false,货币代码,USD
+purchase,transaction_id,string,true,订单 ID,order_1234567890_xyz
+purchase,value,number,true,支付金额（美元）,2.99
+purchase,currency,string,true,货币代码,USD
+purchase,items,array,true,购买项目列表,[{item_id: "job_123", item_name: "Family Mosaic Generation", price: 2.99, quantity: 1}]
+download_click,job_id,string,true,任务 ID,job_1234567890_abc
+download_click,quality,string,false,下载质量（hd/preview）,hd
+download_click,model_provider,string,false,模型供应商（fal/mock/degraded）,fal
+download_click,model_id,string,false,模型 ID（如 fal-ai/flux/schnell）,fal-ai/flux/schnell
+login,method,string,true,登录方式,magic_link
+login,email_hash,string,false,Email 地址的 SHA-256 哈希值,a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
+login,user_id,string,false,用户 ID（登录成功后）,550e8400-e29b-41d4-a716-446655440000
+results_ok,job_id,string,true,任务 ID,job_1234567890_abc
+results_ok,image_count,number,false,生成的图片数量,4
+results_ok,quality_scores,object,false,品质分数,{overall: 0.85, clarity: 0.9, color: 0.8}
+results_ok,voucher_issued,boolean,false,是否发放重生成券,false
+results_ok,model_provider,string,true,模型供应商（fal/mock/degraded）,fal
+results_ok,model_id,string,false,模型 ID（如 fal-ai/flux/schnell）,fal-ai/flux/schnell
+
+
+

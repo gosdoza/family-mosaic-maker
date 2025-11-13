@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { AspectRatio } from "@/components/ui/aspect-ratio"
 import Image from "next/image"
-import { Download, Loader2, Lock, Share2, Sparkles, Check } from "lucide-react"
+import { Download, Loader2, Lock, Share2, Sparkles, Check, Gift } from "lucide-react"
 import { useAuth } from "@/lib/useAuth"
 import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
@@ -22,6 +22,11 @@ interface ResultsResponse {
   images: ResultImage[]
   paymentStatus: "paid" | "unpaid"
   createdAt: string
+  qualityScores?: {
+    clip: number
+    brisque: number
+  }
+  voucherIssued?: boolean
 }
 
 function ResultsContent() {
@@ -236,6 +241,20 @@ function ResultsContent() {
                 >
                   Upgrade Now
                 </Button>
+              </div>
+            )}
+            {results.voucherIssued && (
+              <div
+                data-testid="voucher-issued-banner"
+                className="mt-4 p-4 bg-blue-500/10 text-blue-400 rounded-lg border border-blue-500/20"
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Gift className="w-5 h-5" />
+                  <span className="font-semibold">重生成券已發放</span>
+                </div>
+                <p className="text-sm text-blue-300">
+                  此批品質較低（CLIP: {results.qualityScores?.clip.toFixed(2)}, BRISQUE: {results.qualityScores?.brisque.toFixed(0)}），已贈送一次重生成券（72 小時有效）。
+                </p>
               </div>
             )}
           </div>

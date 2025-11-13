@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
+import { createClient as createServiceClient } from "@supabase/supabase-js"
 import e2eStore from "@/lib/e2eStore"
+import { generateMockPreviewUrls } from "@/lib/generation/mock-state-machine"
+import { calculateQualityScores, shouldIssueVoucher, generateVoucher } from "@/lib/generation/quality-scorer"
 
 export async function GET(
   request: NextRequest,
@@ -21,23 +24,91 @@ export async function GET(
     if (useMock) {
       // Check e2e store for job
       const job = e2eStore.jobs.get(jobId)
+      
+      // 生成 Mock 预览图
+      const mockPreviewUrls = generateMockPreviewUrls(3)
+      const mockImages = mockPreviewUrls.map((url, idx) => ({
+        id: idx,
+        url,
+        thumbnail: url,
+      }))
+
       if (!job) {
         // Fallback to mock results data for testing
-        const mockImages = [
-          { id: 0, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
-          { id: 1, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
-        ]
-
         // Check for paid order even if job doesn't exist in store
         const paid = [...e2eStore.orders.values()].some(
           (o) => o.job_id === jobId && o.status === "paid"
         )
+
+        // 计算品质分数并检查是否需要发放重生成券
+        const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
+        const qualityScores = calculateQualityScores(forceLowQuality)
+        const needsVoucher = shouldIssueVoucher(qualityScores)
+
+        // 获取用户 ID（如果已登录）
+        const supabase = await createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+
+        if (needsVoucher && user) {
+          // 发放重生成券
+          const voucher = generateVoucher(jobId, user.id)
+          
+          // 记录到 analytics_logs（先不建表，用 analytics_logs 记录）
+          await logAnalyticsEvent({
+            event_type: "voucher_issued",
+            job_id: jobId,
+            user_id: user.id,
+            data: {
+              voucher_id: voucher.id,
+              voucher_type: voucher.type,
+              expires_at: voucher.expires_at,
+              quality_scores: qualityScores,
+            },
+          })
+        }
+
+        // 记录 results_ok 事件
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+        const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+        const falApiKey = process.env.FAL_API_KEY
+        const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
+        const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
+        const modelId = useMock ? null : (falApiKey ? falModelId : null)
+        
+        await logAnalyticsEvent({
+          event_type: "results_ok",
+          request_id: requestId,
+          job_id: jobId,
+          user_id: user?.id || null,
+          data: {
+            image_count: mockImages.length,
+            quality_scores: qualityScores,
+            voucher_issued: needsVoucher,
+            model_provider: modelProvider,
+            model_id: modelId,
+          },
+        })
+
+        // 记录 preview_view 事件
+        await logAnalyticsEvent({
+          event_type: "preview_view",
+          request_id: requestId,
+          job_id: jobId,
+          user_id: user?.id || null,
+          data: {
+            image_count: mockImages.length,
+            preview_size: 1024,
+            has_watermark: !paid,
+          },
+        })
 
         return NextResponse.json({
           jobId,
           images: mockImages,
           paymentStatus: paid ? "paid" : "unpaid",
           createdAt: new Date().toISOString(),
+          qualityScores,
+          voucherIssued: needsVoucher,
         })
       }
 
@@ -51,15 +122,79 @@ export async function GET(
         console.log(`[Results API] Job ${jobId}: paymentStatus=${paid ? "paid" : "unpaid"}, orders=${e2eStore.orders.size}`)
       }
 
+      // 计算品质分数
+      const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
+      const qualityScores = calculateQualityScores(forceLowQuality)
+      const needsVoucher = shouldIssueVoucher(qualityScores)
+
+      // 获取用户 ID
+      const supabase = await createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+
+      if (needsVoucher && user) {
+        // 发放重生成券
+        const voucher = generateVoucher(jobId, user.id)
+        
+        // 记录到 analytics_logs
+        await logAnalyticsEvent({
+          event_type: "voucher_issued",
+          job_id: jobId,
+          user_id: user.id,
+          data: {
+            voucher_id: voucher.id,
+            voucher_type: voucher.type,
+            expires_at: voucher.expires_at,
+            quality_scores: qualityScores,
+          },
+        })
+      }
+
+        // 记录 results_ok 事件
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+        const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+        const falApiKey = process.env.FAL_API_KEY
+        const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
+        const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
+        const modelId = useMock ? null : (falApiKey ? falModelId : null)
+        
+        await logAnalyticsEvent({
+          event_type: "results_ok",
+          request_id: requestId,
+          job_id: jobId,
+          user_id: user?.id || null,
+          data: {
+            image_count: (job.result_urls || []).length,
+            quality_scores: qualityScores,
+            voucher_issued: needsVoucher,
+            model_provider: modelProvider,
+            model_id: modelId,
+          },
+        })
+
+      // 记录 preview_view 事件
+      await logAnalyticsEvent({
+        event_type: "preview_view",
+        request_id: requestId,
+        job_id: jobId,
+        user_id: user?.id || null,
+        data: {
+          image_count: (job.result_urls || []).length,
+          preview_size: 1024,
+          has_watermark: !paid,
+        },
+      })
+
       return NextResponse.json({
         jobId,
-        images: (job.result_urls || []).map((url, idx) => ({
+        images: (job.result_urls || mockImages).map((url, idx) => ({
           id: idx,
-          url,
-          thumbnail: url,
+          url: typeof url === "string" ? url : url.url || url,
+          thumbnail: typeof url === "string" ? url : url.thumbnail || url.url || url,
         })),
         paymentStatus: paid ? "paid" : "unpaid",
         createdAt: job.created_at ?? new Date().toISOString(),
+        qualityScores,
+        voucherIssued: needsVoucher,
       })
     }
 
@@ -117,11 +252,71 @@ export async function GET(
       thumbnail: img.thumbnail_url || img.url,
     }))
 
+    // 计算品质分数（非 Mock 模式）
+    const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
+    const qualityScores = calculateQualityScores(forceLowQuality)
+    const needsVoucher = shouldIssueVoucher(qualityScores)
+
+    if (needsVoucher && user) {
+      // 发放重生成券
+      const voucher = generateVoucher(jobId, user.id)
+      
+      // 记录到 analytics_logs
+      await logAnalyticsEvent({
+        event_type: "voucher_issued",
+        job_id: jobId,
+        user_id: user.id,
+        data: {
+          voucher_id: voucher.id,
+          voucher_type: voucher.type,
+          expires_at: voucher.expires_at,
+          quality_scores: qualityScores,
+        },
+      })
+    }
+
+    // 记录 results_ok 事件
+    const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+    const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    const falApiKey = process.env.FAL_API_KEY
+    const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
+    const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
+    const modelId = useMock ? null : (falApiKey ? falModelId : null)
+    
+    await logAnalyticsEvent({
+      event_type: "results_ok",
+      request_id: requestId,
+      job_id: jobId,
+      user_id: user.id,
+      data: {
+        image_count: formattedImages.length,
+        quality_scores: qualityScores,
+        voucher_issued: needsVoucher,
+        model_provider: modelProvider,
+        model_id: modelId,
+      },
+    })
+
+    // 记录 preview_view 事件
+    await logAnalyticsEvent({
+      event_type: "preview_view",
+      request_id: requestId,
+      job_id: jobId,
+      user_id: user.id,
+      data: {
+        image_count: formattedImages.length,
+        preview_size: 1024,
+        has_watermark: paymentStatus !== "paid",
+      },
+    })
+
     return NextResponse.json({
       jobId,
       images: formattedImages,
       paymentStatus,
       createdAt: job.created_at || new Date().toISOString(),
+      qualityScores,
+      voucherIssued: needsVoucher,
     })
   } catch (error) {
     console.error("Error in results API:", error)
@@ -129,5 +324,43 @@ export async function GET(
       { error: "Failed to fetch results" },
       { status: 500 }
     )
+  }
+}
+
+/**
+ * 记录 analytics_logs 事件
+ */
+async function logAnalyticsEvent(event: {
+  event_type: string
+  job_id: string
+  request_id?: string
+  user_id?: string | null
+  data?: any
+}) {
+  try {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    )
+
+    await serviceClient.from("analytics_logs").insert({
+      event_type: event.event_type,
+      event_data: {
+        job_id: event.job_id,
+        request_id: event.request_id || null,
+        ...event.data,
+      },
+      user_id: event.user_id || null,
+      created_at: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("Failed to log analytics event:", error)
+    // 不抛出错误，避免影响主流程
   }
 }

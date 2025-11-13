@@ -1,0 +1,54 @@
+{
+  "nav": {
+    "generate": "Generate",
+    "pricing": "Pricing",
+    "orders": "Orders",
+    "help": "Help",
+    "signIn": "Sign In"
+  },
+  "cta": {
+    "generateNow": "Generate Now",
+    "getStarted": "Get Started",
+    "payWithPayPal": "Pay with PayPal",
+    "saveChanges": "Save Changes"
+  },
+  "pricing": {
+    "title": "Free vs Premium",
+    "subtitle": "Compare our plans and choose what works best for your family memories",
+    "free": "Free",
+    "premium": "Premium",
+    "tryItOut": "Try It Out",
+    "mostPopular": "Most Popular",
+    "perPhoto": "per photo",
+    "professionalQuality": "Professional quality for your memories",
+    "perfectForTesting": "Perfect for testing our service",
+    "chargedInUSD": "Charged in USD; PayPal will convert based on exchange rate"
+  },
+  "results": {
+    "title": "Your Results",
+    "noResults": "No results yet",
+    "generating": "Generating...",
+    "download": "Download",
+    "processing": "Processing"
+  },
+  "status": {
+    "loading": "Loading...",
+    "error": "Error",
+    "success": "Success",
+    "processing": "Processing...",
+    "completed": "Completed"
+  },
+  "footer": {
+    "madeWith": "Made with",
+    "by": "by Family Mosaic Maker",
+    "privacyPolicy": "Privacy Policy",
+    "refundPolicy": "Refund Policy",
+    "settings": "Settings"
+  },
+  "hero": {
+    "tagline": "AI-Powered Family Moments",
+    "title": "Turn Memories Into Family Moments",
+    "subtitle": "Transform single portraits into beautiful AI-generated family photos"
+  }
+}
+

@@ -1,26 +1,119 @@
 import { NextRequest, NextResponse } from "next/server"
 import { IS_MOCK } from "@/lib/config"
+import { createClient } from "@/lib/supabase/server"
+import { createClient as createServiceClient } from "@supabase/supabase-js"
 import { createOrderRecord } from "@/lib/orders"
+import { createPayPalOrder } from "@/lib/paypal/client"
+import { checkIdempotencyKey, saveIdempotencyKey } from "@/lib/paypal/idempotency"
 import e2eStore from "@/lib/e2eStore"
 
 export async function POST(request: NextRequest) {
+  const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  
   try {
-    const body = await request.json()
-    const { product, jobId } = body
-
-    // Validate request
-    if (!product || !jobId) {
+    // 1. 检查幂等性 Key
+    const idempotencyKey = request.headers.get("X-Idempotency-Key")
+    
+    if (!idempotencyKey) {
       return NextResponse.json(
-        { error: "Product and jobId are required" },
+        { error: "X-Idempotency-Key header is required", request_id: requestId },
         { status: 400 }
       )
     }
 
-    // Check if we're using mock mode
+    // 2. 检查幂等性 Key 是否已使用（測試環境和生產環境都使用統一的 checkIdempotencyKey，它會根據環境自動選擇存儲方式）
+    const idempotencyCheck = await checkIdempotencyKey(idempotencyKey)
+    
+    if (idempotencyCheck.exists) {
+      // 记录 checkout_init 事件（重复请求）
+      await logAnalyticsEvent({
+        event_type: "checkout_init",
+        request_id: requestId,
+        user_id: null,
+        error: "idempotency_key_exists",
+        data: {
+          idempotency_key: idempotencyKey,
+          existing_order_id: idempotencyCheck.orderId,
+        },
+      })
+
+      return NextResponse.json(
+        {
+          error: "Idempotency key already used",
+          orderId: idempotencyCheck.orderId,
+          request_id: requestId,
+        },
+        { status: 409 }
+      )
+    }
+
+    // 3. 验证用户身份
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (authError || !user) {
+      return NextResponse.json(
+        { error: "Unauthorized", request_id: requestId },
+        { status: 401 }
+      )
+    }
+
+    // 4. 解析请求体
+    const body = await request.json()
+    const { jobId, price } = body
+
+    if (!jobId || !price) {
+      return NextResponse.json(
+        { error: "jobId and price are required", request_id: requestId },
+        { status: 400 }
+      )
+    }
+
+    // 5. 记录 checkout_init 事件
+    await logAnalyticsEvent({
+      event_type: "checkout_init",
+      request_id: requestId,
+      user_id: user.id,
+      data: {
+        job_id: jobId,
+        price,
+        idempotency_key: idempotencyKey,
+      },
+    })
+
+    // 6. 檢查是否使用 Mock 模式或測試環境
     const useMock = IS_MOCK || process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    const isTestMode = process.env.NODE_ENV !== 'production' && process.env.ALLOW_TEST_LOGIN === 'true'
+    
+    // 測試環境專用成功路徑（不影響 production）
+    if (isTestMode) {
+      // 保存 idempotency key 到 idempotency store，以便重放時檢查
+      const testOrderId = 'TEST_ORDER_001'
+      await saveIdempotencyKey(idempotencyKey, testOrderId, "created")
+      
+      const testApprovalUrl = 'https://www.sandbox.paypal.com/checkoutnow?token=TEST_ORDER_001'
+      console.log('[checkout] test-mode mock response', {
+        orderId: testOrderId,
+        approvalUrl: testApprovalUrl,
+        idempotencyKey,
+      })
+      return NextResponse.json(
+        {
+          ok: true,
+          provider: 'paypal',
+          orderId: testOrderId,
+          approvalUrl: testApprovalUrl,
+          request_id: requestId,
+        },
+        { status: 200 },
+      )
+    }
 
     if (useMock) {
-      // 建立 paid 訂單到 e2eStore
+      // Mock 模式：建立 paid 訂單到 e2eStore
       const orderId = `ord_${Date.now()}`
       e2eStore.orders.set(orderId, {
         id: orderId,
@@ -28,55 +121,195 @@ export async function POST(request: NextRequest) {
         status: "paid",
         provider: "paypal",
         provider_ref: "mock-capture",
-        user_id: "e2e-user",
+        user_id: user.id,
+        idempotency_key: idempotencyKey,
       })
 
       // Also create order record in database (if needed for non-mock compatibility)
       try {
-        await createOrderRecord({
+        const order = await createOrderRecord({
           jobId,
           status: "paid",
-          amountCents: 299, // $2.99
+          amountCents: Math.round(parseFloat(price) * 100),
           currency: "USD",
+        })
+
+        // 保存幂等性 Key
+        await saveIdempotencyKey(idempotencyKey, order.id, "paid")
+
+        // 记录 checkout_ok 事件
+        await logAnalyticsEvent({
+          event_type: "checkout_ok",
+          request_id: requestId,
+          user_id: user.id,
+          data: {
+            job_id: jobId,
+            order_id: order.id,
+            price,
+            mode: "mock",
+          },
+        })
+
+        return NextResponse.json({
+          approvalUrl: `/results?id=${jobId}&paid=1`,
+          orderId: order.id,
+          jobId,
+          request_id: requestId,
         })
       } catch (e) {
         // Ignore database errors in mock mode
         console.warn("[Checkout] Database order creation failed in mock mode:", e)
       }
 
-      // Return approvalUrl in format /results?id=${jobId}&paid=1
+      // 记录 checkout_ok 事件
+      await logAnalyticsEvent({
+        event_type: "checkout_ok",
+        request_id: requestId,
+        user_id: user.id,
+        data: {
+          job_id: jobId,
+          order_id: orderId,
+          price,
+          mode: "mock",
+        },
+      })
+
       return NextResponse.json({
         approvalUrl: `/results?id=${jobId}&paid=1`,
         orderId,
         jobId,
+        request_id: requestId,
       })
     }
 
-    // TODO: Integrate with PayPal SDK
-    // 1. Create PayPal order
-    // 2. Get approval URL from PayPal
-    // 3. Store order in database with status='pending'
-    // 4. Return approval URL
+    // 7. 非 Mock 模式：创建 PayPal 订单
+    try {
+      const paypalOrder = await createPayPalOrder({
+        jobId,
+        amount: price,
+        currency: "USD",
+        idempotencyKey,
+      })
 
-    // For now, return a mock response (will be replaced with real PayPal integration)
-    const order = await createOrderRecord({
-      jobId,
-      status: "pending",
-      amountCents: 299,
-      currency: "USD",
-    })
+      // 8. 获取 approval URL
+      const approvalLink = paypalOrder.links.find((link: any) => link.rel === "approve")
+      if (!approvalLink) {
+        throw new Error("No approval URL found in PayPal order")
+      }
 
-    return NextResponse.json({
-      approvalUrl: `/results?id=${jobId}&paid=1`, // Temporary for development
-      orderId: order.id,
-      jobId,
-    })
-  } catch (error) {
+      // 9. 在数据库中创建订单记录
+      const order = await createOrderRecord({
+        jobId,
+        status: "pending",
+        amountCents: Math.round(parseFloat(price) * 100),
+        currency: "USD",
+        approvalUrl: approvalLink.href,
+      })
+
+      // 10. 更新订单的 PayPal Order ID 和幂等性 Key
+      const serviceClient = createServiceClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.SUPABASE_SERVICE_ROLE_KEY!,
+        {
+          auth: {
+            autoRefreshToken: false,
+            persistSession: false,
+          },
+        }
+      )
+
+      await serviceClient
+        .from("orders")
+        .update({
+          paypal_order_id: paypalOrder.id,
+          idempotency_key: idempotencyKey,
+        })
+        .eq("id", order.id)
+
+      // 11. 保存幂等性 Key
+      await saveIdempotencyKey(idempotencyKey, order.id, "pending")
+
+      // 12. 记录 checkout_ok 事件
+      await logAnalyticsEvent({
+        event_type: "checkout_ok",
+        request_id: requestId,
+        user_id: user.id,
+        data: {
+          job_id: jobId,
+          order_id: order.id,
+          paypal_order_id: paypalOrder.id,
+          price,
+          mode: "paypal",
+        },
+      })
+
+      return NextResponse.json({
+        approvalUrl: approvalLink.href,
+        orderId: order.id,
+        jobId,
+        request_id: requestId,
+      })
+    } catch (error: any) {
+      console.error("PayPal order creation failed:", error)
+      
+      // 记录错误事件
+      await logAnalyticsEvent({
+        event_type: "checkout_init",
+        request_id: requestId,
+        user_id: user.id,
+        error: "paypal_error",
+        data: {
+          job_id: jobId,
+          message: error.message,
+        },
+      })
+
+      throw error
+    }
+  } catch (error: any) {
     console.error("Error in checkout API:", error)
     return NextResponse.json(
-      { error: "Failed to process checkout" },
+      { error: "Failed to process checkout", request_id: requestId },
       { status: 500 }
     )
+  }
+}
+
+/**
+ * 记录 analytics_logs 事件
+ */
+async function logAnalyticsEvent(event: {
+  event_type: string
+  request_id: string
+  user_id: string | null
+  error?: string
+  data?: any
+}) {
+  try {
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    )
+
+    await serviceClient.from("analytics_logs").insert({
+      event_type: event.event_type,
+      event_data: {
+        request_id: event.request_id,
+        error: event.error,
+        ...event.data,
+      },
+      user_id: event.user_id,
+      created_at: new Date().toISOString(),
+    })
+  } catch (error) {
+    console.error("Failed to log analytics event:", error)
+    // 不抛出错误，避免影响主流程
   }
 }
 

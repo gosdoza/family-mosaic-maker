@@ -107,7 +107,7 @@ export async function verifyPayPalWebhookSignature(
 async function getPayPalAccessToken(): Promise<string | null> {
   try {
     const clientId = process.env.PAYPAL_CLIENT_ID
-    const clientSecret = process.env.PAYPAL_SECRET
+    const clientSecret = process.env.PAYPAL_CLIENT_SECRET || process.env.PAYPAL_SECRET
 
     if (!clientId || !clientSecret) {
       console.error("PayPal credentials not configured")

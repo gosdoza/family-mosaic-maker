@@ -4,6 +4,7 @@ import Link from "next/link"
 import { Menu, X, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
+import { t } from "@/lib/i18n-client"
 
 export function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -22,20 +23,20 @@ export function Navigation() {
           {/* Desktop Navigation */}
           <div className="hidden md:flex items-center gap-6">
             <Link href="/generate" className="text-sm font-medium hover:text-primary transition-colors">
-              Generate
+              {t("nav.generate")}
             </Link>
             <Link href="/pricing" className="text-sm font-medium hover:text-primary transition-colors">
-              Pricing
+              {t("nav.pricing")}
             </Link>
             <Link href="/orders" className="text-sm font-medium hover:text-primary transition-colors">
-              Orders
+              {t("nav.orders")}
             </Link>
             <Link href="/help" className="text-sm font-medium hover:text-primary transition-colors">
-              Help
+              {t("nav.help")}
             </Link>
             <Link href="/auth/login">
               <Button size="sm" className="rounded-full">
-                Sign In
+                {t("nav.signIn")}
               </Button>
             </Link>
           </div>
@@ -54,32 +55,32 @@ export function Navigation() {
               className="block text-sm font-medium hover:text-primary transition-colors"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Generate
+              {t("nav.generate")}
             </Link>
             <Link
               href="/pricing"
               className="block text-sm font-medium hover:text-primary transition-colors"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Pricing
+              {t("nav.pricing")}
             </Link>
             <Link
               href="/orders"
               className="block text-sm font-medium hover:text-primary transition-colors"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Orders
+              {t("nav.orders")}
             </Link>
             <Link
               href="/help"
               className="block text-sm font-medium hover:text-primary transition-colors"
               onClick={() => setMobileMenuOpen(false)}
             >
-              Help
+              {t("nav.help")}
             </Link>
             <Link href="/auth/login" onClick={() => setMobileMenuOpen(false)}>
               <Button size="sm" className="w-full rounded-full">
-                Sign In
+                {t("nav.signIn")}
               </Button>
             </Link>
           </div>

@@ -1,0 +1,54 @@
+{
+  "nav": {
+    "generate": "生成",
+    "pricing": "価格",
+    "orders": "注文",
+    "help": "ヘルプ",
+    "signIn": "サインイン"
+  },
+  "cta": {
+    "generateNow": "今すぐ生成",
+    "getStarted": "始める",
+    "payWithPayPal": "PayPalで支払う",
+    "saveChanges": "変更を保存"
+  },
+  "pricing": {
+    "title": "無料 vs プレミアム",
+    "subtitle": "プランを比較して、ご家族の思い出に最適なプランを選択してください",
+    "free": "無料",
+    "premium": "プレミアム",
+    "tryItOut": "試す",
+    "mostPopular": "最も人気",
+    "perPhoto": "写真1枚あたり",
+    "professionalQuality": "思い出のためのプロ品質",
+    "perfectForTesting": "サービスのテストに最適",
+    "chargedInUSD": "USDで請求されます。PayPalが為替レートに基づいて換算します"
+  },
+  "results": {
+    "title": "結果",
+    "noResults": "結果がありません",
+    "generating": "生成中...",
+    "download": "ダウンロード",
+    "processing": "処理中"
+  },
+  "status": {
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "success": "成功",
+    "processing": "処理中...",
+    "completed": "完了"
+  },
+  "footer": {
+    "madeWith": "で作られました",
+    "by": "Family Mosaic Maker",
+    "privacyPolicy": "プライバシーポリシー",
+    "refundPolicy": "返金ポリシー",
+    "settings": "設定"
+  },
+  "hero": {
+    "tagline": "AI パワードの家族の瞬間",
+    "title": "思い出を家族の瞬間に変える",
+    "subtitle": "単一のポートレートを美しい AI 生成の家族写真に変換"
+  }
+}
+

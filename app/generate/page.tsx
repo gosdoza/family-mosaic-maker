@@ -84,24 +84,51 @@ function GenerateContent() {
   }, [isMock, e2e, selectedStyle, selectedTemplate, currentStep])
 
   const handleGenerate = async () => {
-    // In mock mode, skip validation and directly navigate
-    if (isMock) {
-      trackMetric({ event: "generate_started", jobId: "demo-001" })
-      toast({
-        title: "Job Created",
-        description: "Your family mosaic generation has started!",
-      })
-      router.push("/progress/demo-001")
-      return
-    }
-
-    // Non-mock mode: validate and call API
-    if (!canProceed()) return
-
     setIsGenerating(true)
     setError(null)
 
     try {
+      // In mock mode, call API to get job ID
+      if (isMock) {
+        const response = await fetch("/api/generate", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            files: uploadedFiles.map((file) => ({
+              name: file.name,
+              size: file.size,
+              type: file.type,
+            })),
+            style: selectedStyle,
+            template: selectedTemplate,
+          }),
+        })
+
+        if (!response.ok) {
+          const errorData = await response.json()
+          throw new Error(errorData.error || "Failed to generate")
+        }
+
+        const data = await response.json()
+        const jobId = data.jobId
+
+        trackMetric({ event: "generate_started", jobId })
+        toast({
+          title: "Job Created",
+          description: "Your family mosaic generation has started!",
+        })
+        router.push(`/progress/${jobId}`)
+        return
+      }
+
+      // Non-mock mode: validate and call API
+      if (!canProceed()) {
+        setIsGenerating(false)
+        return
+      }
+
       // Create FormData to send files
       const formData = new FormData()
       uploadedFiles.forEach((file) => {
@@ -158,6 +185,13 @@ function GenerateContent() {
 
       <main className="flex-1 pt-24 pb-16">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
+          {/* Mock 模式提示 */}
+          {isMock && (
+            <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
+              <span className="font-medium">⚠️ 目前為 Mock 生成（未接入供應商）</span>
+              <span className="ml-2 text-yellow-700">功能僅供內部測試</span>
+            </div>
+          )}
           <div className="text-center space-y-4 mb-12">
             <h1 className="text-4xl sm:text-5xl font-bold text-balance">
               Create Your{" "}

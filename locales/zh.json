@@ -1,0 +1,54 @@
+{
+  "nav": {
+    "generate": "生成",
+    "pricing": "價格",
+    "orders": "訂單",
+    "help": "幫助",
+    "signIn": "登入"
+  },
+  "cta": {
+    "generateNow": "立即生成",
+    "getStarted": "開始使用",
+    "payWithPayPal": "使用 PayPal 付款",
+    "saveChanges": "儲存變更"
+  },
+  "pricing": {
+    "title": "免費 vs 高級版",
+    "subtitle": "比較我們的方案，選擇最適合您家庭回憶的方案",
+    "free": "免費",
+    "premium": "高級版",
+    "tryItOut": "試用",
+    "mostPopular": "最受歡迎",
+    "perPhoto": "每張照片",
+    "professionalQuality": "專業品質，為您的回憶",
+    "perfectForTesting": "非常適合測試我們的服務",
+    "chargedInUSD": "以 USD 計費；PayPal 將依匯率換算"
+  },
+  "results": {
+    "title": "您的結果",
+    "noResults": "尚無結果",
+    "generating": "生成中...",
+    "download": "下載",
+    "processing": "處理中"
+  },
+  "status": {
+    "loading": "載入中...",
+    "error": "錯誤",
+    "success": "成功",
+    "processing": "處理中...",
+    "completed": "已完成"
+  },
+  "footer": {
+    "madeWith": "由",
+    "by": "Family Mosaic Maker 製作",
+    "privacyPolicy": "隱私政策",
+    "refundPolicy": "退款政策",
+    "settings": "設定"
+  },
+  "hero": {
+    "tagline": "AI 驅動的家庭時刻",
+    "title": "將回憶轉化為家庭時刻",
+    "subtitle": "將單人肖像轉換為美麗的 AI 生成家庭照片"
+  }
+}
+

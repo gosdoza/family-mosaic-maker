@@ -12,6 +12,7 @@ import { IS_MOCK_CLIENT } from "@/lib/config"
 import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
 import { trackMetric } from "@/lib/metrics"
+import { t } from "@/lib/i18n-client"
 
 function PricingContent() {
   const router = useRouter()
@@ -31,19 +32,37 @@ function PricingContent() {
       setLoading(true)
       setError(null)
 
+      // 生成幂等性 Key
+      const idempotencyKey = `checkout_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+
       // use the unified mock/real checkout route
       const res = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ product: "download_hd", jobId: job }),
+        headers: {
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify({ jobId: job, price: "2.99" }),
       })
 
-      if (!res.ok) throw new Error("checkout_failed")
+      if (!res.ok) {
+        const errorData = await res.json()
+        if (res.status === 409) {
+          // 幂等性冲突：订单已存在
+          const { orderId, approvalUrl } = errorData
+          if (approvalUrl) {
+            router.replace(approvalUrl)
+            return
+          }
+          throw new Error("Order already exists")
+        }
+        throw new Error(errorData.error || "checkout_failed")
+      }
 
       const { approvalUrl } = await res.json()
 
-      // Track payment started metric
-      trackMetric({ event: "payment_paid", jobId: job })
+      // Track purchase success event (GA)
+      trackMetric({ event: "purchase_success", jobId: job, metadata: { amount: "2.99", currency: "USD" } })
 
       // In mock mode, log mock redirect
       if (isMock) {
@@ -95,13 +114,10 @@ function PricingContent() {
         <div className="container relative z-10 mx-auto px-4 sm:px-6 lg:px-8 max-w-6xl">
           <div className="text-center space-y-4 mb-16">
             <h1 className="text-4xl sm:text-5xl font-bold text-balance">
-              Free vs{" "}
-              <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                Premium
-              </span>
+              {t("pricing.title")}
             </h1>
             <p className="text-lg text-muted-foreground max-w-2xl mx-auto text-pretty">
-              Compare our plans and choose what works best for your family memories
+              {t("pricing.subtitle")}
             </p>
           </div>
 
@@ -111,16 +127,16 @@ function PricingContent() {
               <div className="space-y-6">
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-muted">
                   <Zap className="w-4 h-4" />
-                  <span className="text-sm font-medium">Free</span>
+                  <span className="text-sm font-medium">{t("pricing.free")}</span>
                 </div>
 
                 <div>
-                  <h3 className="text-2xl font-bold mb-2">Try It Out</h3>
+                  <h3 className="text-2xl font-bold mb-2">{t("pricing.tryItOut")}</h3>
                   <div className="flex items-baseline gap-2 mb-4">
                     <span className="text-5xl font-bold">$0</span>
-                    <span className="text-muted-foreground">per photo</span>
+                    <span className="text-muted-foreground">{t("pricing.perPhoto")}</span>
                   </div>
-                  <p className="text-muted-foreground">Perfect for testing our service</p>
+                  <p className="text-muted-foreground">{t("pricing.perfectForTesting")}</p>
                 </div>
 
                 <ul className="space-y-4">
@@ -174,16 +190,16 @@ function PricingContent() {
               <div className="space-y-6">
                 <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10">
                   <Sparkles className="w-4 h-4 text-primary" />
-                  <span className="text-sm font-medium text-primary">Most Popular</span>
+                  <span className="text-sm font-medium text-primary">{t("pricing.mostPopular")}</span>
                 </div>
 
                 <div>
-                  <h3 className="text-2xl font-bold mb-2">Premium</h3>
+                  <h3 className="text-2xl font-bold mb-2">{t("pricing.premium")}</h3>
                   <div className="flex items-baseline gap-2 mb-4">
                     <span className="text-5xl font-bold">$2.99</span>
-                    <span className="text-muted-foreground">per photo</span>
+                    <span className="text-muted-foreground">{t("pricing.perPhoto")}</span>
                   </div>
-                  <p className="text-muted-foreground">Professional quality for your memories</p>
+                  <p className="text-muted-foreground">{t("pricing.professionalQuality")}</p>
                 </div>
 
                 <ul className="space-y-4">
@@ -235,10 +251,17 @@ function PricingContent() {
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5 mr-2" aria-hidden="true" />
-                      <span>Pay with PayPal - $2.99</span>
+                      <span>{t("cta.payWithPayPal")} - $2.99</span>
                     </>
                   )}
                 </Button>
+
+                {/* 价格文案：USD 結帳＋多語 */}
+                <div className="mt-4 p-3 bg-muted/30 rounded-lg text-center">
+                  <p className="text-xs text-muted-foreground">
+                    {t("pricing.chargedInUSD")}
+                  </p>
+                </div>
 
                 {error && (
                   <div className="text-center p-4 rounded-2xl bg-destructive/10 border border-destructive/20">

@@ -1,14 +1,24 @@
 {
-  "headers": [
+  "crons": [
     {
-      "source": "/(.*)",
-      "headers": [
-        {"key":"X-Frame-Options","value":"SAMEORIGIN"},
-        {"key":"X-Content-Type-Options","value":"nosniff"},
-        {"key":"Referrer-Policy","value":"strict-origin-when-cross-origin"},
-        {"key":"Permissions-Policy","value":"camera=(), geolocation=(), microphone=()"}
-      ]
+      "path": "/api/analytics/ga4/export",
+      "schedule": "0 1 * * *"
+    },
+    {
+      "path": "/api/gdpr/process",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/degradation/detect",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/incident/check",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/degradation/cost-guard",
+      "schedule": "*/5 * * * *"
     }
   ]
 }
-
