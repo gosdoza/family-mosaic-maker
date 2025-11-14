@@ -2,10 +2,26 @@ import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
 
 // Protected routes that require authentication
+// 注意：這些是頁面路由（page routes），不是 API 路由
+// API 路由（/api/*）由各自的 route handler 內部處理認證
 const PROTECTED_ROUTES = ["/orders", "/results", "/settings"]
+
+// Public API routes that should never require authentication
+// 這些路由應該永遠是公開的，用於健康檢查等用途
+const PUBLIC_API_ROUTES = ["/api/version", "/api/health"]
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
+
+  // ============================================
+  // 白名單檢查：Public API Routes 永遠不需要認證
+  // ============================================
+  // 這些路由（如 /api/version）應該永遠是公開的，用於健康檢查等用途
+  // 即使未來 middleware 配置改變，這些路由也不會被攔截
+  if (PUBLIC_API_ROUTES.some((route) => pathname === route)) {
+    const response = NextResponse.next()
+    return addSecurityHeaders(response, request)
+  }
 
   const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
 
@@ -21,6 +37,15 @@ export async function middleware(request: NextRequest) {
     }
   }
 
+  // ============================================
+  // 受保護的頁面路由檢查
+  // ============================================
+  // 注意：這裡只檢查頁面路由（/orders, /results, /settings）
+  // API 路由（/api/*）由各自的 route handler 內部處理認證
+  // 目前受保護的路由：
+  // - /orders - 訂單頁面
+  // - /results - 結果頁面
+  // - /settings - 設定頁面
   // Check if route is protected
   const isProtectedRoute = PROTECTED_ROUTES.some((route) => pathname.startsWith(route))
 
@@ -114,6 +139,8 @@ function addSecurityHeaders(response: NextResponse, request: NextRequest): NextR
 export const config = {
   matcher: [
     // ✅ 完全排除 API 與靜態資源
+    // 注意：這個 matcher 會排除所有 /api/* 路由，所以 middleware 不會攔截 API 請求
+    // 但是為了保險起見，我們在上面的白名單檢查中明確處理了 /api/version 等公開 API
     "/((?!_next/static|_next/image|favicon.ico|api/).*)",
   ],
 }
