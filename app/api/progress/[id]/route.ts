@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { createClient as createServiceClient } from "@supabase/supabase-js"
 import { updateMockJobState, createMockJob } from "@/lib/generation/mock-state-machine"
+import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
 
 // Mock Job 状态存储（内存，生产环境应使用数据库）
 const mockJobStore = new Map<string, ReturnType<typeof createMockJob>>()
@@ -30,12 +31,49 @@ export async function GET(
       })
     }
 
-    // Check if we're using mock mode
-    const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    // Check provider type (new system with backward compatibility)
+    const providerType = getProviderType()
+    const useMock = providerType === "mock"
 
-    if (useMock) {
-      // 特殊處理：demo-001 直接返回完成狀態（用於 QA 測試）
-      if (jobId === "demo-001") {
+    // 使用 Provider 系統
+    const provider = getGenerationProvider()
+    
+    try {
+      const progress = await provider.getProgress(jobId)
+      
+      // 記錄 progress_tick 事件
+      await logAnalyticsEvent({
+        event_type: "progress_tick",
+        job_id: jobId,
+        data: {
+          status: progress.status,
+          progress: progress.progress,
+        },
+      })
+
+      // 正規化狀態（與現有 API 回應格式一致）
+      // ProgressResult 狀態: pending/processing/succeeded/failed
+      // API 回應狀態: queued/processing/succeeded/failed (或 pending/processing/succeeded/failed)
+      const statusMap: Record<string, string> = {
+        pending: "processing", // pending → processing (與現有 API 一致)
+        processing: "processing",
+        succeeded: "succeeded",
+        failed: "failed",
+      }
+      
+      const apiStatus = statusMap[progress.status] || progress.status
+
+      return NextResponse.json({
+        jobId,
+        status: apiStatus,
+        progress: progress.progress,
+        message: progress.message || progress.errorMessage,
+      })
+    } catch (error: any) {
+      console.error(`Error in ${provider.name}Provider.getProgress:`, error)
+      
+      // 如果是 Mock Provider 且是 demo-001，特殊處理（向後兼容）
+      if (provider.name === "mock" && jobId === "demo-001") {
         return NextResponse.json({
           jobId,
           status: "succeeded",
@@ -43,105 +81,11 @@ export async function GET(
           message: "Generation complete!",
         })
       }
-
-      // Mock 模式：使用状态机模拟进度
-      let job = mockJobStore.get(jobId)
       
-      if (!job) {
-        // 创建新的 Mock Job
-        job = createMockJob(jobId)
-        mockJobStore.set(jobId, job)
-      } else {
-        // 更新 Mock Job 状态
-        job = updateMockJobState(job)
-        mockJobStore.set(jobId, job)
-      }
-
-      // 记录 progress_tick 事件
-      await logAnalyticsEvent({
-        event_type: "progress_tick",
-        job_id: jobId,
-        data: {
-          status: job.status,
-          progress: job.progress,
-        },
-      })
-
-      return NextResponse.json({
-        jobId,
-        status: job.status === "queued" ? "processing" : job.status === "running" ? "processing" : job.status,
-        progress: job.progress,
-        message: job.message,
-      })
+      // 其他錯誤返回 500
+      return NextResponse.json({ error: "Failed to fetch progress" }, { status: 500 })
     }
 
-    // 测试模式：允许跳过用户验证
-    const isTestModeForAuth = process.env.NODE_ENV !== 'production' && process.env.ALLOW_TEST_LOGIN === 'true'
-    let user: { id: string } | null = null
-    
-    if (isTestModeForAuth) {
-      user = { id: "test-user" }
-    } else {
-      // Get current user
-      const supabase = await createClient()
-      const {
-        data: { user: currentUser },
-      } = await supabase.auth.getUser()
-
-      if (!currentUser) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-      }
-      user = currentUser
-    }
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    // Fetch job status from database
-    const { data: job, error } = await supabase
-      .from("jobs")
-      .select("status, progress, error_message")
-      .eq("id", jobId)
-      .eq("user_id", user.id)
-      .single()
-
-    if (error || !job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 })
-    }
-
-    // Map database status to API response
-    const statusMap: Record<string, string> = {
-      pending: "processing",
-      processing: "processing",
-      completed: "succeeded",
-      failed: "failed",
-    }
-
-    const apiStatus = statusMap[job.status] || "processing"
-    const progress = job.progress || (apiStatus === "succeeded" ? 100 : 50)
-
-    // 记录 progress_tick 事件
-    await logAnalyticsEvent({
-      event_type: "progress_tick",
-      job_id: jobId,
-      data: {
-        status: apiStatus,
-        progress,
-      },
-    })
-
-    return NextResponse.json({
-      jobId,
-      status: apiStatus,
-      progress,
-      message:
-        apiStatus === "succeeded"
-          ? "Generation complete!"
-          : apiStatus === "failed"
-            ? job.error_message || "Generation failed"
-            : "Processing your images...",
-    })
   } catch (error) {
     console.error("Error in progress API:", error)
     return NextResponse.json(

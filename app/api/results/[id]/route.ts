@@ -4,6 +4,7 @@ import { createClient as createServiceClient } from "@supabase/supabase-js"
 import e2eStore from "@/lib/e2eStore"
 import { generateMockPreviewUrls } from "@/lib/generation/mock-state-machine"
 import { calculateQualityScores, shouldIssueVoucher, generateVoucher } from "@/lib/generation/quality-scorer"
+import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
 
 export async function GET(
   request: NextRequest,
@@ -18,10 +19,14 @@ export async function GET(
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 })
     }
 
-    // Check if we're using mock mode
-    const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    // Check provider type (new system with backward compatibility)
+    const providerType = getProviderType()
+    const useMock = providerType === "mock"
 
     if (useMock) {
+      // Mock 模式：嘗試使用 MockProvider，但保留現有邏輯作為 fallback
+      // 因為 results API 有複雜的支付狀態、品質分數等邏輯
+      // 暫時保留現有實作，確保行為一致
       // Check e2e store for job
       const job = e2eStore.jobs.get(jobId)
       
@@ -187,20 +192,149 @@ export async function GET(
         },
       })
 
+      // 處理 result_urls（可能是 string[] 或複雜物件）
+      const imageUrls = (job.result_urls || []).map((url: any) => 
+        typeof url === "string" ? url : url.url || url
+      )
+      const finalImages = imageUrls.length > 0 ? imageUrls : mockImages.map(img => img.url)
+      
       return NextResponse.json({
         jobId,
-        images: (job.result_urls || mockImages).map((url, idx) => ({
+        images: finalImages.map((url, idx) => ({
           id: idx,
-          url: typeof url === "string" ? url : url.url || url,
-          thumbnail: typeof url === "string" ? url : url.thumbnail || url.url || url,
+          url,
+          thumbnail: url,
         })),
         paymentStatus: paid ? "paid" : "unpaid",
-        createdAt: job.created_at ?? new Date().toISOString(),
+        createdAt: new Date().toISOString(), // E2EJob 沒有 created_at 欄位
         qualityScores,
         voucherIssued: needsVoucher,
       })
     }
 
+    // 使用 Provider 系統（Mock 或 Runware）
+    const provider = getGenerationProvider()
+    
+    // 如果是 Mock Provider，保留現有邏輯（因為有複雜的支付狀態、品質分數等）
+    if (provider.name === "mock") {
+      // Mock 邏輯已在上面處理，這裡不需要額外處理
+    } else if (provider.name === "runware") {
+      // Runware Provider
+      // Get current user
+      const supabase = await createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+      }
+
+      try {
+        // 檢查支付狀態
+        const { data: job } = await supabase
+          .from("jobs")
+          .select("order_id")
+          .eq("id", jobId)
+          .eq("user_id", user.id)
+          .single()
+
+        let paid = false
+        if (job?.order_id) {
+          const { data: order } = await supabase
+            .from("orders")
+            .select("payment_status")
+            .eq("id", job.order_id)
+            .single()
+
+          if (order) {
+            paid = order.payment_status === "paid"
+          }
+        }
+
+        const results = await provider.getResults(jobId, { paid })
+        
+        // 计算品质分数（非 Mock 模式）
+        const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
+        const qualityScores = calculateQualityScores(forceLowQuality)
+        const needsVoucher = shouldIssueVoucher(qualityScores)
+
+        if (needsVoucher && user) {
+          // 发放重生成券
+          const voucher = generateVoucher(jobId, user.id)
+          
+          // 记录到 analytics_logs
+          await logAnalyticsEvent({
+            event_type: "voucher_issued",
+            job_id: jobId,
+            user_id: user.id,
+            data: {
+              voucher_id: voucher.id,
+              voucher_type: voucher.type,
+              expires_at: voucher.expires_at,
+              quality_scores: qualityScores,
+            },
+          })
+        }
+
+        // 记录 results_ok 事件
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+        await logAnalyticsEvent({
+          event_type: "results_ok",
+          request_id: requestId,
+          job_id: jobId,
+          user_id: user.id,
+          data: {
+            image_count: results.images.length,
+            quality_scores: qualityScores,
+            voucher_issued: needsVoucher,
+            model_provider: "runware",
+            model_id: null,
+          },
+        })
+
+        // 记录 preview_view 事件
+        await logAnalyticsEvent({
+          event_type: "preview_view",
+          request_id: requestId,
+          job_id: jobId,
+          user_id: user.id,
+          data: {
+            image_count: results.images.length,
+            preview_size: 1024,
+            has_watermark: !paid,
+          },
+        })
+
+        // Fetch job created_at
+        const { data: jobData } = await supabase
+          .from("jobs")
+          .select("created_at")
+          .eq("id", jobId)
+          .single()
+
+        // 轉換 images 格式（ResultsResult.images 是 string[]，但 API 需要 { id, url, thumbnail }[]）
+        const formattedImages = results.images.map((url, idx) => ({
+          id: idx,
+          url,
+          thumbnail: url,
+        }))
+
+        return NextResponse.json({
+          jobId,
+          images: formattedImages,
+          paymentStatus: paid ? "paid" : "unpaid",
+          createdAt: jobData?.created_at || new Date().toISOString(),
+          qualityScores,
+          voucherIssued: needsVoucher,
+        })
+      } catch (error: any) {
+        console.error("Error in RunwareProvider.getResults:", error)
+        return NextResponse.json({ error: "Failed to fetch results" }, { status: 500 })
+      }
+    }
+
+    // 其他非 Mock 模式：使用現有邏輯（向後兼容）
     // Get current user
     const supabase = await createClient()
     const {

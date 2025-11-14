@@ -6,6 +6,7 @@ import { routeGenerateRequest, ProviderGenerateRequest } from "@/lib/generation/
 import { RunwareGenerateRequest } from "@/lib/generation/runware-client"
 import { validateRunwarePayload, RunwarePayload } from "@/lib/providers/runware.schema"
 import { ZodError } from "zod"
+import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
 
 /**
  * 主要流程：
@@ -24,8 +25,9 @@ export async function POST(request: NextRequest) {
   let user: { id: string } | null = null
   
   try {
-    // Check if we're using mock mode
-    const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    // Check provider type (new system with backward compatibility)
+    const providerType = getProviderType()
+    const useMock = providerType === "mock"
     const isTestMode = process.env.NODE_ENV === "test" || useMock
     const allowTestLogin = process.env.ALLOW_TEST_LOGIN === "true"
     const isProduction = process.env.NODE_ENV === "production"
@@ -129,12 +131,39 @@ export async function POST(request: NextRequest) {
       )
     }
     
-    if (useMock) {
-      // Mock 模式：生成 Mock Job ID
-      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-      
-      // 创建 Mock Job 状态（存储在内存或数据库中）
-      const mockJob = createMockJob(jobId)
+    // 使用 Provider 系統（Mock 或 Runware）
+    const provider = getGenerationProvider()
+    
+    // 解析請求（支援 FormData 或 JSON）
+    let files: File[] = []
+    let style: string = ""
+    let template: string = ""
+    
+    const contentType = request.headers.get("content-type") || ""
+    if (contentType.includes("multipart/form-data")) {
+      try {
+        const formData = await request.formData()
+        files = formData.getAll("files") as File[]
+        style = formData.get("style") as string || ""
+        template = formData.get("template") as string || ""
+      } catch (error) {
+        // 忽略解析錯誤
+      }
+    } else {
+      try {
+        const body = await request.json()
+        files = (body.files || []) as File[]
+        style = body.style || ""
+        template = body.template || ""
+      } catch (error) {
+        // 忽略解析錯誤
+      }
+    }
+    
+    // 如果使用 Mock Provider，直接呼叫
+    if (provider.name === "mock") {
+      const fileUrls = files.map(f => f.name || "")
+      const { jobId } = await provider.generate({ files: fileUrls, style, template })
       
       // 记录 gen_ok 事件（Mock 模式）
       await logAnalyticsEvent({
@@ -151,44 +180,33 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ ok: true, jobId, request_id: requestId })
     }
-
-    // 非 Mock 模式：解析请求（支持 FormData 或 JSON）
-    let files: File[] = []
-    let style: string = ""
-    let template: string = ""
-
-    // 根据 Content-Type 决定解析方式（避免重复读取请求体）
-    const contentType = request.headers.get("content-type") || ""
     
-    if (contentType.includes("multipart/form-data")) {
-      // FormData 格式
-      try {
-        const formData = await request.formData()
-        files = formData.getAll("files") as File[]
-        style = formData.get("style") as string || ""
-        template = formData.get("template") as string || ""
-      } catch (error) {
-        return NextResponse.json(
-          { ok: false, error: "Invalid FormData format", request_id: requestId },
-          { status: 400 }
-        )
-      }
-    } else {
-      // JSON 格式
-      try {
-        const body = await request.json()
-        // files 可能是字符串数组（URL）或 File 对象数组
-        files = (body.files || []) as File[]
-        style = body.style || ""
-        template = body.template || ""
-      } catch (jsonError) {
-        return NextResponse.json(
-          { ok: false, error: "Invalid JSON format", request_id: requestId },
-          { status: 400 }
-        )
-      }
+    // 如果使用 Runware Provider
+    if (provider.name === "runware") {
+      const fileUrls = await getFileUrls(files, user.id)
+      // 將 userId 傳入 payload（provider 可能需要）
+      const payload = { files: fileUrls, style, template, userId: user.id, requestId }
+      const { jobId } = await provider.generate(payload)
+      
+      // 记录 gen_ok 事件（Runware 模式）
+      await logAnalyticsEvent({
+        event_type: "gen_ok",
+        request_id: requestId,
+        user_id: user.id,
+        data: {
+          job_id: jobId,
+          mode: "runware",
+          model_provider: "runware",
+          model_id: null,
+        },
+      })
+
+      return NextResponse.json({ ok: true, jobId, request_id: requestId })
     }
 
+    // 如果走到這裡，表示 provider 不是 mock 也不是 runware（可能是 fal 或其他）
+    // 使用現有的 Provider Router（向後兼容）
+    
     // Validate inputs - 返回缺失字段列表
     const missingFields: string[] = []
     if (!files || files.length === 0) {
@@ -213,7 +231,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 使用 Provider Router 路由请求
     let jobId: string
     let mode: "fal" | "runware" | "mock" | "degraded" = "fal"
     let finalModelProvider: string = "fal"
