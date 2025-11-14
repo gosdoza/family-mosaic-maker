@@ -22,19 +22,13 @@ export default async function LoginPage() {
     redirect("/dashboard")
   }
 
-  // 檢查是否為 PREVIEW 環境
-  const isPreview =
-    process.env.VERCEL_ENV === "preview" ||
-    process.env.NEXT_PUBLIC_ENV === "preview"
-
   // 未登入：顯示登入表單
   return (
     <>
-      {isPreview && (
-        <div className="w-full bg-red-600 text-white text-center py-3 font-bold tracking-wide text-lg shadow-md">
-          🚨 PREVIEW BUILD ACTIVE — Login Page 🚨
-        </div>
-      )}
+      {/* DEBUG BANNER - 永遠顯示，用於確認部署 */}
+      <div className="w-full bg-black text-yellow-300 text-center py-4 font-mono text-xl font-bold">
+        *** DEBUG BUILD - LOGIN PAGE ***
+      </div>
       <div className="min-h-screen flex flex-col">
       <Navigation />
 

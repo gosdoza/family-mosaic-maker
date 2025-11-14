@@ -97,14 +97,14 @@ export default function Home() {
                 className="text-5xl sm:text-6xl lg:text-7xl font-bold tracking-tight text-balance"
                 variants={fadeUpVariants}
               >
-                {t("hero.title")}
+                🔥 DEBUG HOMEPAGE BUILD 🔥
               </motion.h1>
 
               <motion.p
                 className="text-xl sm:text-2xl text-muted-foreground max-w-2xl mx-auto text-pretty"
                 variants={fadeUpVariants}
               >
-                {t("hero.subtitle")}
+                If you can read this, Vercel is using the latest frontend code.
               </motion.p>
 
               <motion.div
