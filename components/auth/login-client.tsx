@@ -20,22 +20,33 @@ export function LoginClient() {
     setLoading(true)
 
     try {
-      // 使用 window.location.origin 動態產生 redirectTo
-      // 讓「Production 登 Production、Preview 登 Preview、本機登本機」
-      const redirectTo =
+      // 強制所有環境使用 window.location.origin 作為 redirectTo
+      const origin =
         typeof window !== "undefined"
-          ? window.location.origin + "/auth/callback"
-          : "/auth/callback"
+          ? window.location.origin
+          : (process.env.NEXT_PUBLIC_SITE_URL ?? "https://family-mosaic-maker.vercel.app")
+      const redirectTo = `${origin}/auth/callback`
 
-      // DEBUG: 明確印出 redirectTo 值（在實際使用的 login component 中）
-      console.log("DEBUG redirectTo in REAL login component:", redirectTo)
-      alert("redirectTo=" + redirectTo)
+      console.log("[login] emailRedirectTo", redirectTo)
+      console.log("📋 開 DevTools → Network → 找 /auth/v1/otp → 檢查 redirect_to Query String")
+
+      // Step 3: 若 redirectTo 不是 preview，直接阻止送出
+      try {
+        const url = new URL(redirectTo)
+        const host = url.hostname
+        if (host === "family-mosaic-maker.vercel.app") {
+          alert("⚠️ WARNING：目前 redirectTo 是 Production！你應該在 Preview login 打開。")
+          setLoading(false)
+          return
+        }
+      } catch (e) {
+        console.error("Invalid redirectTo URL", redirectTo)
+      }
 
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           emailRedirectTo: redirectTo,
-          shouldCreateUser: true,
         },
       })
 
@@ -127,12 +138,12 @@ export function LoginClient() {
         )}
 
         {/* DEBUG: 顯示當前 redirectTo 值（超明顯的紅色 debug 標籤） */}
-        <p data-debug-redirect className="mt-4 text-xs text-center text-red-600 font-mono">
+        <div style={{ color: "red", fontSize: 12 }} className="mt-4 text-center font-mono">
           DEBUG redirectTo (runtime):{" "}
           {typeof window !== "undefined"
-            ? window.location.origin + "/auth/callback"
-            : "(server)"}
-        </p>
+            ? `${window.location.origin}/auth/callback`
+            : (process.env.NEXT_PUBLIC_SITE_URL ?? "https://family-mosaic-maker.vercel.app") + "/auth/callback"}
+        </div>
       </form>
     </Card>
   )

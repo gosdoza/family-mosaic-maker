@@ -40,27 +40,22 @@ function GenerateContent() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [isPreview, setIsPreview] = useState(false)
   const { toast } = useToast()
   const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
   const e2e = searchParams.get("e2e") === "1"
   
-  // Detect if we're in a preview environment (Vercel preview deployments)
-  useEffect(() => {
-    // Check env var first (set at build time)
-    if (process.env.NEXT_PUBLIC_VERCEL_ENV === "preview") {
-      setIsPreview(true)
-      return
-    }
-    // Fallback to hostname check (client-side only)
+  // Unified preview environment detection
+  const isPreviewEnv = (() => {
+    if (process.env.NEXT_PUBLIC_VERCEL_ENV === "preview") return true
+
     if (typeof window !== "undefined") {
-      const hostname = window.location.hostname
-      const isVercelPreview = 
-        hostname.includes("vercel.app") && 
-        !hostname.includes("family-mosaic-maker.vercel.app")
-      setIsPreview(isVercelPreview)
+      const host = window.location.hostname
+      const prod = "family-mosaic-maker.vercel.app"
+      return host !== prod // everything except prod = preview
     }
-  }, [])
+
+    return false
+  })()
 
   const handleFilesChange = (files: File[]) => {
     setUploadedFiles(files)
@@ -89,7 +84,7 @@ function GenerateContent() {
     const hasBasicInputs = uploadedFiles.length > 0 && selectedStyle !== "" && selectedTemplate !== ""
     
     // In mock mode or preview, allow generation with basic inputs
-    if (isMock || isPreview || e2e) {
+    if (isMock || isPreviewEnv || e2e) {
       return hasBasicInputs && !isGenerating
     }
     
@@ -127,7 +122,7 @@ function GenerateContent() {
       selectedStyle,
       selectedTemplate,
       isMock,
-      isPreview,
+      isPreviewEnv,
       e2e,
       isGenerating,
       canProceed: canProceed(),
@@ -139,110 +134,36 @@ function GenerateContent() {
     selectedStyle,
     selectedTemplate,
     isMock,
-    isPreview,
+    isPreviewEnv,
     e2e,
     isGenerating,
   ])
 
+  // TEMPORARY:
+  // For Route A (UX demo), we always use a mock job and skip the real /api/generate call.
+  // TODO: Reintroduce real Runware generate flow for non-preview once Route A is fully validated.
   const handleGenerate = async () => {
-    setIsGenerating(true)
-    setError(null)
-
-    // Log generation start for debugging
-    console.log("[generate][click]", {
+    // TEMP: force mock flow globally
+    const payload = {
       currentStep,
       uploadedCount: uploadedFiles.length,
       selectedStyle,
       selectedTemplate,
+      // keep these for debugging, but they no longer affect control flow:
       isMock,
-      isPreviewEnv: isPreview || process.env.NEXT_PUBLIC_VERCEL_ENV === "preview",
+      isPreviewEnv,
       e2e,
-      isGenerating,
-    })
-
-    try {
-      // In mock mode, call API to get job ID
-      if (isMock) {
-        const response = await fetch("/api/generate", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            files: uploadedFiles.map((file) => ({
-              name: file.name,
-              size: file.size,
-              type: file.type,
-            })),
-            style: selectedStyle,
-            template: selectedTemplate,
-          }),
-        })
-
-        if (!response.ok) {
-          const errorData = await response.json()
-          throw new Error(errorData.error || "Failed to generate")
-        }
-
-        const data = await response.json()
-        const jobId = data.jobId
-
-        trackMetric({ event: "generate_started", jobId })
-        toast({
-          title: "Job Created",
-          description: "Your family mosaic generation has started!",
-        })
-        router.push(`/progress/${jobId}`)
-        return
-      }
-
-      // Non-mock mode: validate and call API
-      if (!canProceed()) {
-        setIsGenerating(false)
-        return
-      }
-
-      // Create FormData to send files
-      const formData = new FormData()
-      uploadedFiles.forEach((file) => {
-        formData.append("files", file)
-      })
-      formData.append("style", selectedStyle)
-      formData.append("template", selectedTemplate)
-
-      // Call the API
-      const response = await fetch("/api/generate", {
-        method: "POST",
-        body: formData,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.error || "Failed to generate")
-      }
-
-      const data = await response.json()
-      const jobId = data.jobId
-
-      // Track metric
-      trackMetric({ event: "generate_started", jobId })
-
-      // Show toast notification
-      toast({
-        title: "Job Created",
-        description: "Your family mosaic generation has started!",
-      })
-
-      // Navigate to progress page with job ID
-      router.push(`/progress/${jobId}`)
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : "An error occurred"
-      setError(errorMessage)
-      setIsGenerating(false)
-      
-      // Track failure
-      trackMetric({ event: "generate_failed", metadata: { error: errorMessage } })
     }
+
+    console.log("[generate][click:mock-only]", payload)
+
+    // 🚫 IMPORTANT:
+    // - DO NOT call fetch("/api/generate", ...) here.
+    // - DO NOT construct FormData for Runware here.
+    // - This handler should have exactly one side-effect: navigation.
+
+    const mockJobId = "demo-001"
+    router.push(`/progress/${mockJobId}`)
   }
 
   const handleRetry = () => {
@@ -387,7 +308,6 @@ function GenerateContent() {
                     // 原本的 disabled 邏輯：!canGenerate()
                     const originalDisabled = !canGenerate()
                     // 在 preview 環境一律解鎖，方便測試
-                    const isPreviewEnv = process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" || isPreview
                     const generateDisabled = isPreviewEnv ? false : originalDisabled
                     
                     return (
@@ -415,7 +335,7 @@ function GenerateContent() {
                   })()}
                   
                   {/* DEBUG: Generate Page State (Preview Only) */}
-                  {(process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" || isPreview) && (
+                  {isPreviewEnv && (
                     <div className="mt-8 rounded-xl border border-dashed border-red-500 bg-red-50 p-4 text-xs font-mono text-red-800 space-y-2" data-debug-generate>
                       <div className="font-bold text-red-700 mb-1">
                         DEBUG – Generate Page State (preview only)
@@ -428,11 +348,12 @@ function GenerateContent() {
                             selectedStyle,
                             selectedTemplate,
                             isMock,
-                            isPreview,
+                            isPreviewEnv,
                             e2e,
                             isGenerating,
                             canProceed: canProceed(),
                             canGenerate: typeof canGenerate === "function" ? canGenerate() : "(not in scope)",
+                            generateEndpoint: isPreviewEnv ? "MOCK (direct demo-001)" : "/api/generate",
                           },
                           null,
                           2
