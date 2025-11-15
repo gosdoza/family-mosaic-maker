@@ -25,6 +25,7 @@
 | `PAYPAL_WEBHOOK_ID` | PayPal | PayPal Webhook ID | `xxxxx` | `xxxxx` | `xxxxx` |
 | `PAYPAL_ENV` | PayPal | PayPal 环境（sandbox/production） | `sandbox` | `sandbox` | `production` |
 | `DOMAIN` | Domain | 应用域名 | `http://localhost:3000` | `https://family-mosaic-maker-xxxxx.vercel.app` | `https://family-mosaic-maker.vercel.app` |
+| `NEXT_PUBLIC_SITE_URL` | Domain | 前端用来生成 Supabase Magic Link redirect URL 的 base URL | `http://localhost:3000` | `https://family-mosaic-maker.vercel.app` | `https://family-mosaic-maker.vercel.app` |
 | `NEXT_PUBLIC_USE_MOCK` | Feature Flag | 是否启用 Mock 模式 | `true` | `true` | `false` |
 | `USE_MOCK` | Feature Flag | 服务端 Mock 模式（已弃用，使用 NEXT_PUBLIC_USE_MOCK） | `true` | `true` | `false` |
 | `IS_MOCK` | Feature Flag | Mock 模式标志（内部使用） | - | - | - |
@@ -49,6 +50,15 @@
 - **格式验证**: 
   - Dev: 允许 `http://localhost:3000` 或 `http://localhost:*`
   - Vercel: 必须以 `https://` 开头，且不包含 `localhost`
+
+### NEXT_PUBLIC_SITE_URL 变量
+
+- **用途**: 用于生成 Supabase Magic Link 的 `emailRedirectTo`，确保无论在哪里部署（Preview / Production），Magic Link 都指向正式 domain
+- **本地开发**: `NEXT_PUBLIC_SITE_URL = http://localhost:3000`
+- **Vercel Preview / Production**: `NEXT_PUBLIC_SITE_URL = https://family-mosaic-maker.vercel.app`（**建议 Preview 和 Production 都填正式 domain**）
+- **重要**: 
+  - Preview 和 Production 环境都建议设置为正式 domain（`https://family-mosaic-maker.vercel.app`），避免 Magic Link 的 `redirect_to` 指向 preview 子网域
+  - 如果未设置，代码会 fallback 到 `window.location.origin`（可能导致 redirect_to 指向 preview domain）
 
 ### GEN_PROVIDER_WEIGHTS 变量
 
@@ -105,6 +115,7 @@
 
 ### Domain（推荐）
 - `DOMAIN`（本地：`http://localhost:3000`，Vercel：`https://...`）
+- `NEXT_PUBLIC_SITE_URL`（本地：`http://localhost:3000`，Vercel Preview/Production：`https://family-mosaic-maker.vercel.app`）
 
 ### QA & Test（仅本地开发）
 - `ALLOW_TEST_LOGIN`（仅本地：`true`，Vercel：`false` 或不设置）
@@ -137,6 +148,7 @@
 - `PAYPAL_CLIENT_ID`
 - `PAYPAL_CLIENT_SECRET`
 - `GEN_PROVIDER_WEIGHTS`
+- `NEXT_PUBLIC_SITE_URL`（建议设置为 `https://family-mosaic-maker.vercel.app`）
 
 ### 格式验证
 - `DOMAIN`: 

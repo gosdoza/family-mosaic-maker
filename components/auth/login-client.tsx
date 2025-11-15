@@ -24,14 +24,18 @@ export function LoginClient() {
       // 讓「Production 登 Production、Preview 登 Preview、本機登本機」
       const redirectTo =
         typeof window !== "undefined"
-          ? `${window.location.origin}/auth/callback`
+          ? window.location.origin + "/auth/callback"
           : "/auth/callback"
+
+      // DEBUG: 明確印出 redirectTo 值（在實際使用的 login component 中）
+      console.log("DEBUG redirectTo in REAL login component:", redirectTo)
+      alert("redirectTo=" + redirectTo)
 
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {
           emailRedirectTo: redirectTo,
-          shouldCreateUser: true, // 允许自动创建新用户
+          shouldCreateUser: true,
         },
       })
 
@@ -121,6 +125,14 @@ export function LoginClient() {
             <p className="text-sm text-primary">Check your inbox! We've sent you a secure login link.</p>
           </div>
         )}
+
+        {/* DEBUG: 顯示當前 redirectTo 值（超明顯的紅色 debug 標籤） */}
+        <p data-debug-redirect className="mt-4 text-xs text-center text-red-600 font-mono">
+          DEBUG redirectTo (runtime):{" "}
+          {typeof window !== "undefined"
+            ? window.location.origin + "/auth/callback"
+            : "(server)"}
+        </p>
       </form>
     </Card>
   )

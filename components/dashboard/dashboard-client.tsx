@@ -4,7 +4,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
-import { Sparkles, User, Package, ArrowRight, CheckCircle2, Clock } from "lucide-react"
+import { Sparkles, User, Package, ArrowRight, CheckCircle2, Clock, LogOut } from "lucide-react"
 
 interface DashboardClientProps {
   email: string
@@ -122,6 +122,14 @@ export function DashboardClient({ email }: DashboardClientProps) {
                   </Link>
                 )}
               </div>
+            </div>
+            <div className="pt-4 border-t border-border">
+              <Link href="/auth/logout">
+                <Button variant="outline" size="sm" className="w-full gap-2">
+                  <LogOut className="w-4 h-4" />
+                  Sign out
+                </Button>
+              </Link>
             </div>
           </CardContent>
         </Card>

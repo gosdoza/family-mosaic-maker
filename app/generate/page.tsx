@@ -40,9 +40,27 @@ function GenerateContent() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [isPreview, setIsPreview] = useState(false)
   const { toast } = useToast()
   const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
   const e2e = searchParams.get("e2e") === "1"
+  
+  // Detect if we're in a preview environment (Vercel preview deployments)
+  useEffect(() => {
+    // Check env var first (set at build time)
+    if (process.env.NEXT_PUBLIC_VERCEL_ENV === "preview") {
+      setIsPreview(true)
+      return
+    }
+    // Fallback to hostname check (client-side only)
+    if (typeof window !== "undefined") {
+      const hostname = window.location.hostname
+      const isVercelPreview = 
+        hostname.includes("vercel.app") && 
+        !hostname.includes("family-mosaic-maker.vercel.app")
+      setIsPreview(isVercelPreview)
+    }
+  }, [])
 
   const handleFilesChange = (files: File[]) => {
     setUploadedFiles(files)
@@ -58,7 +76,25 @@ function GenerateContent() {
     if (currentStep === 1) return uploadedFiles.length > 0
     if (currentStep === 2) return selectedStyle !== ""
     if (currentStep === 3) return selectedTemplate !== ""
+    // Step 4: Check if all inputs are ready for generation
+    if (currentStep === 4) {
+      return uploadedFiles.length > 0 && selectedStyle !== "" && selectedTemplate !== ""
+    }
     return false
+  }
+  
+  // Check if generation is allowed (for button disabled state)
+  const canGenerate = () => {
+    // Basic requirements: files, style, template
+    const hasBasicInputs = uploadedFiles.length > 0 && selectedStyle !== "" && selectedTemplate !== ""
+    
+    // In mock mode or preview, allow generation with basic inputs
+    if (isMock || isPreview || e2e) {
+      return hasBasicInputs && !isGenerating
+    }
+    
+    // In production (non-mock), use canProceed() which may include additional checks
+    return canProceed() && !isGenerating
   }
 
   // E2E quick pass: auto-fill and jump to step 4
@@ -83,9 +119,46 @@ function GenerateContent() {
     }
   }, [isMock, e2e, selectedStyle, selectedTemplate, currentStep])
 
+  // Debug: Log state changes for troubleshooting
+  useEffect(() => {
+    console.log("[generate][debug-state]", {
+      currentStep,
+      uploadedCount: uploadedFiles.length,
+      selectedStyle,
+      selectedTemplate,
+      isMock,
+      isPreview,
+      e2e,
+      isGenerating,
+      canProceed: canProceed(),
+      canGenerate: typeof canGenerate === "function" ? canGenerate() : "(not in scope)",
+    })
+  }, [
+    currentStep,
+    uploadedFiles.length,
+    selectedStyle,
+    selectedTemplate,
+    isMock,
+    isPreview,
+    e2e,
+    isGenerating,
+  ])
+
   const handleGenerate = async () => {
     setIsGenerating(true)
     setError(null)
+
+    // Log generation start for debugging
+    console.log("[generate][click]", {
+      currentStep,
+      uploadedCount: uploadedFiles.length,
+      selectedStyle,
+      selectedTemplate,
+      isMock,
+      isPreviewEnv: isPreview || process.env.NEXT_PUBLIC_VERCEL_ENV === "preview",
+      e2e,
+      isGenerating,
+    })
 
     try {
       // In mock mode, call API to get job ID
@@ -260,8 +333,12 @@ function GenerateContent() {
               {/* Step 4: Generate */}
               {currentStep === 4 && (
                 <Card className="p-12 glass text-center space-y-6">
+                  {/* DEBUG Banner */}
+                  <div className="w-full bg-[#fde68a] text-center py-3 font-bold text-lg mb-4">
+                    *** DEBUG BUILD – GENERATE PAGE ***
+                  </div>
                   <Sparkles className="w-16 h-16 text-primary mx-auto" />
-                  <h3 className="text-2xl font-semibold">Ready to Generate!</h3>
+                  <h3 className="text-2xl font-semibold">🔥 DEBUG GENERATE PAGE 🔥</h3>
                   <p className="text-muted-foreground max-w-md mx-auto">
                     Your beautiful family photo will be ready in about 60 seconds
                   </p>
@@ -305,26 +382,65 @@ function GenerateContent() {
                   <ChevronRight className="w-5 h-5 ml-2" />
                 </Button>
               ) : (
-                <Button
-                  type="button"
-                  {...(process.env.NODE_ENV !== "production" ? { "data-testid": "btn-generate" } : {})}
-                  size="lg"
-                  className="rounded-full shadow-lg hover:shadow-xl transition-all"
-                  onClick={handleGenerate}
-                  disabled={!isMock && !e2e && (isGenerating || !canProceed())}
-                >
-                  {isGenerating ? (
-                    <>
-                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Generating...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="w-5 h-5 mr-2" />
-                      Generate Family Photo
-                    </>
+                <>
+                  {(() => {
+                    // 原本的 disabled 邏輯：!canGenerate()
+                    const originalDisabled = !canGenerate()
+                    // 在 preview 環境一律解鎖，方便測試
+                    const isPreviewEnv = process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" || isPreview
+                    const generateDisabled = isPreviewEnv ? false : originalDisabled
+                    
+                    return (
+                      <Button
+                        type="button"
+                        {...(process.env.NODE_ENV !== "production" ? { "data-testid": "btn-generate" } : {})}
+                        size="lg"
+                        className="rounded-full shadow-lg hover:shadow-xl transition-all"
+                        onClick={handleGenerate}
+                        disabled={generateDisabled}
+                      >
+                        {isGenerating ? (
+                          <>
+                            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                            Generating...
+                          </>
+                        ) : (
+                          <>
+                            <Sparkles className="w-5 h-5 mr-2" />
+                            Generate Family Photo
+                          </>
+                        )}
+                      </Button>
+                    )
+                  })()}
+                  
+                  {/* DEBUG: Generate Page State (Preview Only) */}
+                  {(process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" || isPreview) && (
+                    <div className="mt-8 rounded-xl border border-dashed border-red-500 bg-red-50 p-4 text-xs font-mono text-red-800 space-y-2" data-debug-generate>
+                      <div className="font-bold text-red-700 mb-1">
+                        DEBUG – Generate Page State (preview only)
+                      </div>
+                      <pre className="whitespace-pre-wrap break-all">
+                        {JSON.stringify(
+                          {
+                            currentStep,
+                            uploadedCount: uploadedFiles?.length || 0,
+                            selectedStyle,
+                            selectedTemplate,
+                            isMock,
+                            isPreview,
+                            e2e,
+                            isGenerating,
+                            canProceed: canProceed(),
+                            canGenerate: typeof canGenerate === "function" ? canGenerate() : "(not in scope)",
+                          },
+                          null,
+                          2
+                        )}
+                      </pre>
+                    </div>
                   )}
-                </Button>
+                </>
               )}
             </div>
           </div>

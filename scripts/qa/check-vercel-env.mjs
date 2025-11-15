@@ -248,6 +248,35 @@ const ENV_SPEC = {
       return { ok: true }
     }
   },
+  'NEXT_PUBLIC_SITE_URL': {
+    category: 'Domain',
+    description: 'Magic Link redirect URL base（用于 Supabase Auth）',
+    devValue: 'http://localhost:3000',
+    vercelValue: 'https://family-mosaic-maker.vercel.app',
+    validate: (value, isVercel) => {
+      if (!value) {
+        return { ok: false, reason: 'MISSING', message: '缺少此变量可能导致 Magic Link redirect_to 指向 preview domain' }
+      }
+      // 验证是否为有效的 URL 格式
+      if (!value.startsWith('http://') && !value.startsWith('https://')) {
+        return { ok: false, reason: 'SUSPECT', message: '应包含协议（http:// 或 https://）' }
+      }
+      if (isVercel) {
+        // Vercel 环境建议使用正式 domain
+        if (value.includes('localhost')) {
+          return { ok: false, reason: 'SUSPECT', message: 'Vercel 环境禁止使用 localhost' }
+        }
+        // 检查是否为 preview domain（包含随机字符串的 vercel.app）
+        if (value.includes('.vercel.app') && value.match(/family-mosaic-maker-[a-z0-9-]+\.vercel\.app/)) {
+          return { ok: false, reason: 'SUSPECT', message: '建议改为正式 domain: https://family-mosaic-maker.vercel.app' }
+        }
+        if (!value.startsWith('https://')) {
+          return { ok: false, reason: 'SUSPECT', message: 'Vercel 环境必须使用 https://' }
+        }
+      }
+      return { ok: true }
+    }
+  },
   // Feature Flag
   'NEXT_PUBLIC_USE_MOCK': {
     category: 'Feature Flag',
