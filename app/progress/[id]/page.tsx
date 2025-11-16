@@ -28,42 +28,87 @@ export default function ProgressPage() {
   const [error, setError] = useState<string | null>(null)
   const [simulatedProgress, setSimulatedProgress] = useState(0)
 
-  // In mock mode, poll progress and redirect when succeeded
+  // Route A: demo-001 或 mock mode 的 polling 逻辑
   useEffect(() => {
-    if (!isMock || !jobId) return
+    // demo-001 或 mock mode 都需要 polling
+    if (!jobId || (jobId !== "demo-001" && !isMock)) return
 
     let canceled = false
     let pollCount = 0
     const maxPolls = 60 // 最多轮询 60 次（90 秒）
 
-    const pollInterval = setInterval(async () => {
-      if (canceled || pollCount >= maxPolls) {
-        clearInterval(pollInterval)
-        return
-      }
-
-      pollCount++
+    // 立即检查一次状态（不等待第一次 interval）
+    const checkStatus = async () => {
+      if (canceled) return
 
       try {
         const response = await fetch(`/api/progress/${jobId}`)
-        if (!response.ok) return
+        if (!response.ok) {
+          console.error("[progress] polling failed", { jobId, status: response.status })
+          return
+        }
 
         const data: ProgressResponse = await response.json()
         
-        if (data.status === "succeeded") {
-          clearInterval(pollInterval)
-          if (!canceled) {
-            router.push(`/results/${jobId}`)
+        console.log("[progress] polling", { jobId, status: data.status, progress: data.progress })
+        
+        // 更新 UI 状态
+        if (!canceled) {
+          setStatus(data.status)
+          setProgress(data.progress || 0)
+          if (data.message) {
+            setMessage(data.message)
           }
         }
+        
+        if (data.status === "succeeded") {
+          if (!canceled) {
+            console.log("[progress] redirecting to results", jobId)
+            router.push(`/results/${jobId}`)
+          }
+          return true // 返回 true 表示已完成，不需要继续 polling
+        } else if (data.status === "failed") {
+          if (!canceled) {
+            setError("Generation failed. Please try again.")
+          }
+          return true // 返回 true 表示已失败，不需要继续 polling
+        }
       } catch (error) {
-        console.error("Error polling progress:", error)
+        console.error("[progress] Error polling progress:", error)
+        if (!canceled) {
+          setError("Failed to fetch progress. Please try again.")
+        }
       }
-    }, 1500) // 每 1.5 秒轮询一次
+      return false
+    }
+
+    // 立即检查一次
+    let pollInterval: NodeJS.Timeout | null = null
+    
+    checkStatus().then((completed) => {
+      if (completed || canceled) return
+
+      // 如果还没完成，开始定期 polling
+      pollInterval = setInterval(async () => {
+        if (canceled || pollCount >= maxPolls) {
+          if (pollInterval) clearInterval(pollInterval)
+          return
+        }
+
+        pollCount++
+
+        const completed = await checkStatus()
+        if (completed && pollInterval) {
+          clearInterval(pollInterval)
+        }
+      }, 1000) // 每 1 秒轮询一次
+    })
 
     return () => {
       canceled = true
-      clearInterval(pollInterval)
+      if (pollInterval) {
+        clearInterval(pollInterval)
+      }
     }
   }, [isMock, jobId, router])
 
@@ -109,16 +154,16 @@ export default function ProgressPage() {
     }
   }, [isMock, jobId, status])
 
-  // Polling logic for non-mock mode
+  // Polling logic for non-mock mode (非 demo-001 且非 mock)
   useEffect(() => {
-    if (isMock || !jobId) return
+    if (isMock || !jobId || jobId === "demo-001") return
 
     const t = setInterval(() => setTick((x) => x + 1), 1500) // 每 1.5 秒轮询一次
     return () => clearInterval(t)
   }, [isMock, jobId])
 
   useEffect(() => {
-    if (isMock || !jobId) return
+    if (isMock || !jobId || jobId === "demo-001") return
 
     let canceled = false
 

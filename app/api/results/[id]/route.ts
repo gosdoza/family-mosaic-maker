@@ -19,6 +19,19 @@ export async function GET(
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 })
     }
 
+    // Route A: demo-001 固定返回 mock 图片，跳过登录验证（全 mock demo flow）
+    if (jobId === "demo-001") {
+      return NextResponse.json({
+        jobId,
+        images: [
+          { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+          { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+        ],
+        paymentStatus: "unpaid",
+        createdAt: new Date().toISOString(),
+      })
+    }
+
     // Check provider type (new system with backward compatibility)
     const providerType = getProviderType()
     const useMock = providerType === "mock"
@@ -197,7 +210,7 @@ export async function GET(
         typeof url === "string" ? url : url.url || url
       )
       const finalImages = imageUrls.length > 0 ? imageUrls : mockImages.map(img => img.url)
-      
+
       return NextResponse.json({
         jobId,
         images: finalImages.map((url, idx) => ({

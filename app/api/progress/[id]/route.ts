@@ -20,6 +20,16 @@ export async function GET(
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 })
     }
 
+    // Route A: demo-001 固定返回成功（全 mock demo flow）
+    if (jobId === "demo-001") {
+      return NextResponse.json({
+        jobId,
+        status: "succeeded",
+        progress: 100,
+        message: "Mock job completed",
+      })
+    }
+
     // 测试模式：非 production 且 ALLOW_TEST_LOGIN=true 时，对测试 jobId 直接返回完成状态
     const isTestMode = process.env.NODE_ENV !== 'production' && process.env.ALLOW_TEST_LOGIN === 'true'
     if (isTestMode && (jobId === 'test-job-001' || jobId.startsWith('test-job-'))) {
@@ -81,7 +91,7 @@ export async function GET(
           message: "Generation complete!",
         })
       }
-      
+
       // 其他錯誤返回 500
       return NextResponse.json({ error: "Failed to fetch progress" }, { status: 500 })
     }

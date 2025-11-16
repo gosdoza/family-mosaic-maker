@@ -29,7 +29,7 @@ export default async function LoginPage() {
       <div className="w-full bg-black text-yellow-300 text-center py-4 font-mono text-xl font-bold">
         *** DEBUG BUILD - LOGIN PAGE ***
       </div>
-      <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <Navigation />
 
       <main className="flex-1 pt-24 pb-16 flex items-center justify-center">
@@ -51,7 +51,7 @@ export default async function LoginPage() {
       </main>
 
       <Footer />
-      </div>
+    </div>
     </>
   )
 }

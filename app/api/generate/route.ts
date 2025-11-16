@@ -180,7 +180,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ ok: true, jobId, request_id: requestId })
     }
-    
+
     // 如果使用 Runware Provider
     if (provider.name === "runware") {
       const fileUrls = await getFileUrls(files, user.id)
@@ -206,7 +206,7 @@ export async function POST(request: NextRequest) {
 
     // 如果走到這裡，表示 provider 不是 mock 也不是 runware（可能是 fal 或其他）
     // 使用現有的 Provider Router（向後兼容）
-    
+
     // Validate inputs - 返回缺失字段列表
     const missingFields: string[] = []
     if (!files || files.length === 0) {
