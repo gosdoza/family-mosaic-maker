@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { createServerClient } from "@supabase/ssr"
+import { isPreviewEnv, isDemoMode, isDemoJob } from "@/lib/featureFlags"
 
 // Protected routes that require authentication
 // 注意：這些是頁面路由（page routes），不是 API 路由
@@ -9,9 +10,6 @@ const PROTECTED_ROUTES = ["/orders", "/results", "/settings"]
 // Public API routes that should never require authentication
 // 這些路由應該永遠是公開的，用於健康檢查等用途
 const PUBLIC_API_ROUTES = ["/api/version", "/api/health"]
-
-// Helper: Check if we're in Vercel preview environment
-const isPreviewEnv = process.env.VERCEL_ENV === "preview"
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
@@ -26,7 +24,8 @@ export async function middleware(request: NextRequest) {
     return addSecurityHeaders(response, request)
   }
 
-  const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+  // NOTE: behavior preserved, just using centralized feature flags
+  const isMock = isDemoMode
 
   // Dev-only: Allow E2E test cookie bypass for protected routes
   if (process.env.NODE_ENV !== "production") {
@@ -53,14 +52,18 @@ export async function middleware(request: NextRequest) {
   const isProtectedRoute = PROTECTED_ROUTES.some((route) => pathname.startsWith(route))
 
   // Route A / C / D demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問
+  // NOTE: behavior preserved, just using centralized feature flags
   // TEMP (Route D mock): Preview demo exceptions
   // TODO: remove these exceptions when we wire real DB + PayPal
-  const isResultsDemo =
-    pathname === "/results/demo-001" || pathname.startsWith("/results/demo-001")
   const isOrdersDemo = pathname === "/orders"
+  // Check if results path is for demo job (e.g., /results/demo-001)
+  const resultsMatch = pathname.match(/^\/results\/([^\/]+)/)
+  const resultsJobId = resultsMatch ? resultsMatch[1] : null
+  const isResultsDemo = isDemoJob(resultsJobId)
 
   if (isProtectedRoute) {
     // Preview demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問
+    // NOTE: behavior preserved, just using centralized feature flags
     // TEMP (Route D mock): Preview demo exceptions
     // TODO: remove these exceptions when we wire real DB + PayPal
     if (isPreviewEnv && (isOrdersDemo || isResultsDemo)) {

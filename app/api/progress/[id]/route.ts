@@ -3,6 +3,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createClient as createServiceClient } from "@supabase/supabase-js"
 import { updateMockJobState, createMockJob } from "@/lib/generation/mock-state-machine"
 import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
+import { isDemoJob } from "@/lib/featureFlags"
 
 // Mock Job 状态存储（内存，生产环境应使用数据库）
 const mockJobStore = new Map<string, ReturnType<typeof createMockJob>>()
@@ -21,7 +22,8 @@ export async function GET(
     }
 
     // Route A: demo-001 固定返回成功（全 mock demo flow）
-    if (jobId === "demo-001") {
+    // NOTE: behavior preserved, just using centralized feature flags
+    if (isDemoJob(jobId)) {
       return NextResponse.json({
         jobId,
         status: "succeeded",

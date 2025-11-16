@@ -36,7 +36,8 @@ function ResultsContent() {
   const fallbackId = searchParams.get("id") || "demo-001"
   const id = params?.id || fallbackId
   // Route A: demo-001 免登录放行，其他 jobId 需要登录
-  const isDemo = id === "demo-001"
+  // NOTE: behavior preserved, just using centralized feature flags
+  const isDemo = isDemoJob(id)
   const { user, loading: authLoading } = useAuth(!isDemo) // demo-001 不 redirect，其他需要登录
 
   const [loading, setLoading] = useState(true)

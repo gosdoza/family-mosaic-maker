@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { getOrderByJob } from "@/lib/orders"
 import { createClient } from "@/lib/supabase/server"
 import e2eStore from "@/lib/e2eStore"
+import { isDemoMode, isPreviewEnv, isDemoJob } from "@/lib/featureFlags"
 
 export async function GET(request: NextRequest) {
   // Phase 1: Temporary console logging for debugging
@@ -15,18 +16,15 @@ export async function GET(request: NextRequest) {
     const jobId = searchParams.get("jobId")
 
     // Phase 2: Early guard for demo/mock mode - detect preview or mock
+    // NOTE: behavior preserved, just using centralized feature flags
     // TEMP (Route D mock): Be generous in preview to avoid 500s
     // TODO: tighten this when we wire real DB + PayPal
-    const isDemo =
-      process.env.NEXT_PUBLIC_USE_MOCK === "true" ||
-      process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
-      process.env.VERCEL_ENV === "preview"
+    const isDemo = isDemoMode || isPreviewEnv
 
     console.log("[api/orders] mode check", {
       isDemo,
-      NEXT_PUBLIC_USE_MOCK: process.env.NEXT_PUBLIC_USE_MOCK,
-      NEXT_PUBLIC_VERCEL_ENV: process.env.NEXT_PUBLIC_VERCEL_ENV,
-      VERCEL_ENV: process.env.VERCEL_ENV,
+      isDemoMode,
+      isPreviewEnv,
       jobId,
     })
 
@@ -37,7 +35,8 @@ export async function GET(request: NextRequest) {
       // If jobId is provided, return single order by jobId (for results page)
       if (jobId) {
         // For demo-001, return a mock order
-        if (jobId === "demo-001") {
+        // NOTE: behavior preserved, just using centralized feature flags
+        if (isDemoJob(jobId)) {
           return NextResponse.json({
             order: {
               id: "ord_demo_001",
@@ -111,7 +110,8 @@ export async function GET(request: NextRequest) {
     }
 
     // Check if we're using mock mode (legacy check, kept for backward compatibility)
-    const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    // NOTE: behavior preserved, just using centralized feature flags
+    const useMock = isDemoMode
 
     // If jobId is provided, return single order by jobId (for results page)
     if (jobId) {

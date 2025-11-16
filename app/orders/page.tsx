@@ -10,6 +10,7 @@ import { useState, useEffect } from "react"
 import { useAuth } from "@/lib/useAuth"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { isDemoMode, isPreviewEnv } from "@/lib/featureFlags"
 
 interface Order {
   id: string
@@ -33,12 +34,10 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   // Phase 3: Route D - Allow demo/mock mode without forced login
+  // NOTE: behavior preserved, just using centralized feature flags
   // TEMP (Route D mock): Allow /orders in preview without auth
   // TODO: tighten this when we wire real DB + PayPal
-  const isMockDemo =
-    process.env.NEXT_PUBLIC_USE_MOCK === "true" ||
-    process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
-    process.env.VERCEL_ENV === "preview"
+  const isMockDemo = isDemoMode || isPreviewEnv
   const { user, loading: authLoading } = useAuth(!isMockDemo) // Only require auth in non-demo mode
   const router = useRouter()
 

@@ -5,6 +5,7 @@ import e2eStore from "@/lib/e2eStore"
 import { generateMockPreviewUrls } from "@/lib/generation/mock-state-machine"
 import { calculateQualityScores, shouldIssueVoucher, generateVoucher } from "@/lib/generation/quality-scorer"
 import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
+import { isDemoJob } from "@/lib/featureFlags"
 
 export async function GET(
   request: NextRequest,
@@ -21,7 +22,8 @@ export async function GET(
 
     // Route A: demo-001 固定返回 mock 图片，跳过登录验证（全 mock demo flow）
     // Route C: 根据 query string paid=1 返回 paid 状态
-    if (jobId === "demo-001") {
+    // NOTE: behavior preserved, just using centralized feature flags
+    if (isDemoJob(jobId)) {
       const requestUrl = new URL(request.url)
       const paidParam = requestUrl.searchParams.get("paid")
       const isPaid = paidParam === "1" || paidParam === "true"

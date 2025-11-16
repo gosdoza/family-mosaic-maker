@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
 import { trackMetric } from "@/lib/metrics"
+import { isDemoMode, isPreviewEnv as getIsPreviewEnv } from "@/lib/featureFlags"
 
 const STYLE_PRESETS: StylePreset[] = [
   { id: "realistic", name: "Realistic", emoji: "📸", description: "Natural, lifelike family portraits" },
@@ -41,12 +42,14 @@ function GenerateContent() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
-  const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+  // NOTE: behavior preserved, just using centralized feature flags
+  const isMock = isDemoMode
   const e2e = searchParams.get("e2e") === "1"
   
   // Unified preview environment detection
+  // NOTE: behavior preserved, just using centralized feature flags
   const isPreviewEnv = (() => {
-    if (process.env.NEXT_PUBLIC_VERCEL_ENV === "preview") return true
+    if (getIsPreviewEnv) return true
 
     if (typeof window !== "undefined") {
       const host = window.location.hostname

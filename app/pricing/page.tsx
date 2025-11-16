@@ -13,6 +13,7 @@ import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
 import { trackMetric } from "@/lib/metrics"
 import { t } from "@/lib/i18n-client"
+import { isDemoMode } from "@/lib/featureFlags"
 
 function PricingContent() {
   const router = useRouter()
@@ -23,7 +24,8 @@ function PricingContent() {
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()
 
-  const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+  // NOTE: behavior preserved, just using centralized feature flags
+  const isMock = isDemoMode
   const canPay = Boolean(job) && !loading // do NOT gate on anything else in mock mode
 
   const handlePay = async () => {

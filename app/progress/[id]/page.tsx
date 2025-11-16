@@ -7,6 +7,7 @@ import { ErrorState } from "@/components/error-state"
 import { Sparkles } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useRouter, useParams } from "next/navigation"
+import { isDemoMode, isDemoJob } from "@/lib/featureFlags"
 
 interface ProgressResponse {
   jobId: string
@@ -19,7 +20,8 @@ export default function ProgressPage() {
   const router = useRouter()
   const params = useParams<{ id: string }>()
   const jobId = params.id
-  const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+  // NOTE: behavior preserved, just using centralized feature flags
+  const isMock = isDemoMode
   
   const [progress, setProgress] = useState(0)
   const [status, setStatus] = useState<ProgressResponse["status"]>("pending")
@@ -31,7 +33,8 @@ export default function ProgressPage() {
   // Route A: demo-001 或 mock mode 的 polling 逻辑
   useEffect(() => {
     // demo-001 或 mock mode 都需要 polling
-    if (!jobId || (jobId !== "demo-001" && !isMock)) return
+    // NOTE: behavior preserved, just using centralized feature flags
+    if (!jobId || (!isDemoJob(jobId) && !isMock)) return
 
     let canceled = false
     let pollCount = 0
@@ -155,15 +158,17 @@ export default function ProgressPage() {
   }, [isMock, jobId, status])
 
   // Polling logic for non-mock mode (非 demo-001 且非 mock)
+  // NOTE: behavior preserved, just using centralized feature flags
   useEffect(() => {
-    if (isMock || !jobId || jobId === "demo-001") return
+    if (isMock || !jobId || isDemoJob(jobId)) return
 
     const t = setInterval(() => setTick((x) => x + 1), 1500) // 每 1.5 秒轮询一次
     return () => clearInterval(t)
   }, [isMock, jobId])
 
+  // NOTE: behavior preserved, just using centralized feature flags
   useEffect(() => {
-    if (isMock || !jobId || jobId === "demo-001") return
+    if (isMock || !jobId || isDemoJob(jobId)) return
 
     let canceled = false
 

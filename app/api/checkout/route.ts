@@ -6,6 +6,7 @@ import { createOrderRecord } from "@/lib/orders"
 import { createPayPalOrder } from "@/lib/paypal/client"
 import { checkIdempotencyKey, saveIdempotencyKey } from "@/lib/paypal/idempotency"
 import e2eStore from "@/lib/e2eStore"
+import { isDemoJob, isPaypalMock, isDemoMode } from "@/lib/featureFlags"
 
 export async function POST(request: NextRequest) {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
@@ -59,7 +60,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Route C: demo-001 免登录放行（mock demo flow）
-    const isDemo = jobId === "demo-001"
+    // NOTE: behavior preserved, just using centralized feature flags
+    const isDemo = isDemoJob(jobId)
     
     // 3. 验证用户身份（demo-001 例外）
     const supabase = await createClient()
@@ -89,7 +91,8 @@ export async function POST(request: NextRequest) {
     })
 
     // 6. 檢查是否使用 Mock 模式或測試環境
-    const useMock = IS_MOCK || process.env.NEXT_PUBLIC_USE_MOCK === "true"
+    // NOTE: behavior preserved, just using centralized feature flags
+    const useMock = IS_MOCK || isDemoMode
     const isTestMode = process.env.NODE_ENV !== 'production' && process.env.ALLOW_TEST_LOGIN === 'true'
     
     // Route C: demo-001 直接返回 mock approvalUrl（不需要真实 PayPal）
