@@ -241,13 +241,13 @@ export function DashboardClient({ email }: DashboardClientProps) {
                     <div>
                       <p className="font-semibold">{order.jobId || order.id}</p>
                       <div className="flex items-center gap-2 mt-1">
-                        <p className="text-sm text-muted-foreground">
+                      <p className="text-sm text-muted-foreground">
                           {new Date(order.date || order.createdAt || Date.now()).toLocaleDateString("en-US", {
-                            year: "numeric",
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </p>
+                          year: "numeric",
+                          month: "short",
+                          day: "numeric",
+                        })}
+                      </p>
                         {order.amount && (
                           <span className="text-sm font-medium">
                             ${order.amount.toFixed(2)} {order.currency || "USD"}

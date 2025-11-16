@@ -230,71 +230,71 @@ export async function GET(request: NextRequest) {
     // TODO: Remove this exception when real orders integration is ready
     try {
       // Get current user (optional in mock mode)
-      const supabase = await createClient()
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+    const supabase = await createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
       // Only require auth in non-mock mode
       if (!useMock && !user) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-      }
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
-      // Fetch orders from database
-      const { data: orders, error } = await supabase
-        .from("orders")
-        .select(
-          `
-          id,
-          created_at,
-          payment_status,
-          status,
-          job_id,
-          jobs (
-            id,
-            template,
-            style,
-            status,
-            job_images (
-              id,
-              url,
-              thumbnail_url
-            )
-          )
+    // Fetch orders from database
+    const { data: orders, error } = await supabase
+      .from("orders")
+      .select(
         `
+        id,
+        created_at,
+        payment_status,
+        status,
+        job_id,
+        jobs (
+          id,
+          template,
+          style,
+          status,
+          job_images (
+            id,
+            url,
+            thumbnail_url
+          )
         )
+      `
+      )
         .eq("user_id", user?.id || "")
-        .order("created_at", { ascending: false })
+      .order("created_at", { ascending: false })
 
-      if (error) {
+    if (error) {
         console.error("[api/orders] error fetching from DB:", error)
-        return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 })
+      return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 })
+    }
+
+    // Format orders to match frontend structure
+    const formattedOrders = (orders || []).map((order: any) => {
+      const job = order.jobs?.[0] || {}
+      const images = job.job_images || []
+
+      return {
+        id: order.id,
+        date: new Date(order.created_at).toISOString().split("T")[0],
+        status: job.status || order.status || "Completed",
+        thumbnail: images[0]?.thumbnail_url || images[0]?.url || "/placeholder.svg",
+        count: images.length,
+        template: job.template || "Unknown",
+        style: job.style || undefined,
+        jobId: order.job_id || job.id,
+        images: images.map((img: any) => ({
+          id: img.id,
+          url: img.url,
+          thumbnail: img.thumbnail_url || img.url,
+        })),
+        paymentStatus: order.status === "paid" ? "paid" : (order.payment_status || "unpaid"),
       }
+    })
 
-      // Format orders to match frontend structure
-      const formattedOrders = (orders || []).map((order: any) => {
-        const job = order.jobs?.[0] || {}
-        const images = job.job_images || []
-
-        return {
-          id: order.id,
-          date: new Date(order.created_at).toISOString().split("T")[0],
-          status: job.status || order.status || "Completed",
-          thumbnail: images[0]?.thumbnail_url || images[0]?.url || "/placeholder.svg",
-          count: images.length,
-          template: job.template || "Unknown",
-          style: job.style || undefined,
-          jobId: order.job_id || job.id,
-          images: images.map((img: any) => ({
-            id: img.id,
-            url: img.url,
-            thumbnail: img.thumbnail_url || img.url,
-          })),
-          paymentStatus: order.status === "paid" ? "paid" : (order.payment_status || "unpaid"),
-        }
-      })
-
-      return NextResponse.json({ orders: formattedOrders })
+    return NextResponse.json({ orders: formattedOrders })
     } catch (dbError: any) {
       // Phase 2: Controlled error handling - log but return controlled 500
       console.error("[api/orders] error", dbError)

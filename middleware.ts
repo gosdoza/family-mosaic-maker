@@ -84,36 +84,36 @@ export async function middleware(request: NextRequest) {
     // 其他情況維持原本邏輯（要登入才能看）
     // In non-mock mode, check Supabase authentication
     if (!isMock) {
-      try {
-        const supabase = createServerClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-          {
-            cookies: {
-              getAll() {
-                return request.cookies.getAll()
-              },
-              setAll(cookiesToSet) {
-                // Cookies will be set by the response
-              },
+    try {
+      const supabase = createServerClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          cookies: {
+            getAll() {
+              return request.cookies.getAll()
             },
-          }
-        )
-
-        const {
-          data: { user },
-        } = await supabase.auth.getUser()
-
-        if (!user) {
-          // Redirect to login if not authenticated (307 Temporary Redirect)
-          const loginUrl = new URL("/auth/login", request.url)
-          loginUrl.searchParams.set("redirect", pathname)
-          const response = NextResponse.redirect(loginUrl, { status: 307 })
-          return addSecurityHeaders(response, request)
+            setAll(cookiesToSet) {
+              // Cookies will be set by the response
+            },
+          },
         }
-      } catch (error) {
-        // If Supabase is not configured, allow access (for development)
-        console.warn("Supabase auth check failed:", error)
+      )
+
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) {
+        // Redirect to login if not authenticated (307 Temporary Redirect)
+        const loginUrl = new URL("/auth/login", request.url)
+        loginUrl.searchParams.set("redirect", pathname)
+        const response = NextResponse.redirect(loginUrl, { status: 307 })
+        return addSecurityHeaders(response, request)
+      }
+    } catch (error) {
+      // If Supabase is not configured, allow access (for development)
+      console.warn("Supabase auth check failed:", error)
       }
     }
   }

@@ -304,14 +304,14 @@ function ResultsContent() {
                   {!isPaid && (
                     <>
                       <div className="absolute inset-0 bg-black/20 pointer-events-none" />
-                      <div
-                        data-testid="watermark-overlay"
-                        className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none"
-                      >
-                        <span className="rotate-[-20deg] opacity-30 text-4xl font-bold select-none text-white">
-                          PREVIEW
-                        </span>
-                      </div>
+                    <div
+                      data-testid="watermark-overlay"
+                      className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none"
+                    >
+                      <span className="rotate-[-20deg] opacity-30 text-4xl font-bold select-none text-white">
+                        PREVIEW
+                      </span>
+                    </div>
                     </>
                   )}
                 </AspectRatio>

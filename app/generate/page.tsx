@@ -314,26 +314,26 @@ function GenerateContent() {
                     const generateDisabled = isPreviewEnv ? false : originalDisabled
                     
                     return (
-                      <Button
-                        type="button"
-                        {...(process.env.NODE_ENV !== "production" ? { "data-testid": "btn-generate" } : {})}
-                        size="lg"
-                        className="rounded-full shadow-lg hover:shadow-xl transition-all"
-                        onClick={handleGenerate}
+                <Button
+                  type="button"
+                  {...(process.env.NODE_ENV !== "production" ? { "data-testid": "btn-generate" } : {})}
+                  size="lg"
+                  className="rounded-full shadow-lg hover:shadow-xl transition-all"
+                  onClick={handleGenerate}
                         disabled={generateDisabled}
-                      >
-                        {isGenerating ? (
-                          <>
-                            <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                            Generating...
-                          </>
-                        ) : (
-                          <>
-                            <Sparkles className="w-5 h-5 mr-2" />
-                            Generate Family Photo
-                          </>
-                        )}
-                      </Button>
+                >
+                  {isGenerating ? (
+                    <>
+                      <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-5 h-5 mr-2" />
+                      Generate Family Photo
+                    </>
+                  )}
+                </Button>
                     )
                   })()}
                   

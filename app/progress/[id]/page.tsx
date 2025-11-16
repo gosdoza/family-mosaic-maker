@@ -103,14 +103,14 @@ export default function ProgressPage() {
         const completed = await checkStatus()
         if (completed && pollInterval) {
           clearInterval(pollInterval)
-        }
+      }
       }, 1000) // 每 1 秒轮询一次
     })
 
     return () => {
       canceled = true
       if (pollInterval) {
-        clearInterval(pollInterval)
+      clearInterval(pollInterval)
       }
     }
   }, [isMock, jobId, router])
