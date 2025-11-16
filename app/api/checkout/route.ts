@@ -47,20 +47,6 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // 3. 验证用户身份
-    const supabase = await createClient()
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser()
-
-    if (authError || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized", request_id: requestId },
-        { status: 401 }
-      )
-    }
-
     // 4. 解析请求体
     const body = await request.json()
     const { jobId, price } = body
@@ -72,21 +58,65 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Route C: demo-001 免登录放行（mock demo flow）
+    const isDemo = jobId === "demo-001"
+    
+    // 3. 验证用户身份（demo-001 例外）
+    const supabase = await createClient()
+    const {
+      data: { user },
+      error: authError,
+    } = await supabase.auth.getUser()
+
+    if (!isDemo && (authError || !user)) {
+      return NextResponse.json(
+        { error: "Unauthorized", request_id: requestId },
+        { status: 401 }
+      )
+    }
+
     // 5. 记录 checkout_init 事件
     await logAnalyticsEvent({
       event_type: "checkout_init",
       request_id: requestId,
-      user_id: user.id,
+      user_id: user?.id || null,
       data: {
         job_id: jobId,
         price,
         idempotency_key: idempotencyKey,
+        is_demo: isDemo,
       },
     })
 
     // 6. 檢查是否使用 Mock 模式或測試環境
     const useMock = IS_MOCK || process.env.NEXT_PUBLIC_USE_MOCK === "true"
     const isTestMode = process.env.NODE_ENV !== 'production' && process.env.ALLOW_TEST_LOGIN === 'true'
+    
+    // Route C: demo-001 直接返回 mock approvalUrl（不需要真实 PayPal）
+    if (isDemo) {
+      const requestUrl = new URL(request.url)
+      const approvalUrl = `${requestUrl.origin}/results/${jobId}?paid=1&mock=1`
+      
+      // 记录 checkout_ok 事件
+      await logAnalyticsEvent({
+        event_type: "checkout_ok",
+        request_id: requestId,
+        user_id: user?.id || null,
+        data: {
+          job_id: jobId,
+          order_id: `demo-order-${Date.now()}`,
+          price,
+          mode: "mock-demo",
+        },
+      })
+      
+      return NextResponse.json({
+        approvalUrl,
+        provider: "paypal-mock",
+        jobId,
+        request_id: requestId,
+      })
+    }
     
     // 測試環境專用成功路徑（不影響 production）
     if (isTestMode) {

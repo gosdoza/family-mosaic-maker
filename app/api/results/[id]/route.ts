@@ -20,14 +20,19 @@ export async function GET(
     }
 
     // Route A: demo-001 固定返回 mock 图片，跳过登录验证（全 mock demo flow）
+    // Route C: 根据 query string paid=1 返回 paid 状态
     if (jobId === "demo-001") {
+      const requestUrl = new URL(request.url)
+      const paidParam = requestUrl.searchParams.get("paid")
+      const isPaid = paidParam === "1" || paidParam === "true"
+      
       return NextResponse.json({
         jobId,
         images: [
           { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
           { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
         ],
-        paymentStatus: "unpaid",
+        paymentStatus: isPaid ? "paid" : "unpaid",
         createdAt: new Date().toISOString(),
       })
     }

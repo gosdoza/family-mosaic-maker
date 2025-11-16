@@ -17,7 +17,8 @@ import { t } from "@/lib/i18n-client"
 function PricingContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const job = searchParams.get("job")
+  // Route C: 支持 job 和 jobId 参数（向后兼容）
+  const job = searchParams.get("job") || searchParams.get("jobId") || "demo-001"
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const { toast } = useToast()

@@ -96,10 +96,11 @@ function ResultsContent() {
     return () => {
       abort = true
     }
-  }, [id])
+  }, [id, searchParams])
 
-  // 從 results 推導 isPaid，不需要額外的 state
-  const isPaid = results?.paymentStatus === "paid"
+  // Route C: 统一 isPaid 判断（来自 paymentStatus + query param）
+  const isPaidQuery = searchParams.get("paid") === "1" || searchParams.get("paid") === "true"
+  const isPaid = results?.paymentStatus === "paid" || isPaidQuery
 
   const handleDownloadHD = async (imageId: number | string) => {
     if (!isPaid) {
@@ -256,6 +257,13 @@ function ResultsContent() {
                 </Button>
               </div>
             )}
+            {isPaid && (
+              <div className="mt-4 p-4 bg-green-500/10 text-green-400 rounded-lg border border-green-500/20">
+                <p className="text-center font-medium">
+                  🎉 Thank you for upgrading! Your HD images are unlocked. No watermark, full resolution.
+                </p>
+              </div>
+            )}
             {results.voucherIssued && (
               <div
                 data-testid="voucher-issued-banner"
@@ -287,19 +295,22 @@ function ResultsContent() {
                     fill
                     className={`object-cover transition-transform duration-300 ${
                       hoveredId === image.id ? "scale-105" : "scale-100"
-                    } ${!isPaid ? "grayscale blur-sm" : ""}`}
+                    }`}
                     sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
                     priority={index < 3}
                   />
                   {!isPaid && (
-                    <div
-                      data-testid="watermark-overlay"
-                      className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none"
-                    >
-                      <span className="rotate-[-20deg] opacity-30 text-4xl font-bold select-none text-white">
-                        PREVIEW
-                      </span>
-                    </div>
+                    <>
+                      <div className="absolute inset-0 bg-black/20 pointer-events-none" />
+                      <div
+                        data-testid="watermark-overlay"
+                        className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none"
+                      >
+                        <span className="rotate-[-20deg] opacity-30 text-4xl font-bold select-none text-white">
+                          PREVIEW
+                        </span>
+                      </div>
+                    </>
                   )}
                 </AspectRatio>
                 <div className="absolute inset-0 flex flex-col justify-end p-4 bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
