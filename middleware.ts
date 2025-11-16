@@ -51,7 +51,7 @@ export async function middleware(request: NextRequest) {
   // Check if route is protected
   const isProtectedRoute = PROTECTED_ROUTES.some((route) => pathname.startsWith(route))
 
-  // Route A / C / D demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問
+  // Route A / C / D demo 例外：在 preview 環境，允許 /orders、/results/demo-001 和 /dashboard 免登入訪問
   // NOTE: behavior preserved, just using centralized feature flags
   // TEMP (Route D mock): Preview demo exceptions
   // TODO: remove these exceptions when we wire real DB + PayPal
@@ -60,6 +60,16 @@ export async function middleware(request: NextRequest) {
   const resultsMatch = pathname.match(/^\/results\/([^\/]+)/)
   const resultsJobId = resultsMatch ? resultsMatch[1] : null
   const isResultsDemo = isDemoJob(resultsJobId)
+  // TEMP (Route D demo): In preview demo mode, allow /dashboard without auth so we can show mock "Recent Orders"
+  const isDashboardDemo = pathname === "/dashboard"
+
+  // TEMP (Route D demo): In preview demo mode, allow /dashboard without auth
+  // NOTE: This check happens before isProtectedRoute because /dashboard is not in PROTECTED_ROUTES
+  // but we still want to handle it explicitly for demo mode
+  if (isPreviewEnv && isDemoMode && isDashboardDemo) {
+    const res = NextResponse.next()
+    return addSecurityHeaders(res, request)
+  }
 
   if (isProtectedRoute) {
     // Preview demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問

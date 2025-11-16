@@ -3,18 +3,22 @@ import { getCurrentUser } from "@/lib/supabase/server"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { DashboardClient } from "@/components/dashboard/dashboard-client"
+import { isDemoMode, isPreviewEnv } from "@/lib/featureFlags"
 
 export default async function DashboardPage() {
+  // NOTE: In preview demo mode we allow anonymous visitors to see dashboard + mock orders (Route D)
+  const demoMode = isDemoMode && isPreviewEnv
+
   // 使用 server-side 方式取得目前登入的使用者
   const user = await getCurrentUser()
 
-  // 如果沒有 session，直接 redirect 到登入頁
-  if (!user) {
+  // 如果沒有 session，在非 demo 模式下直接 redirect 到登入頁
+  if (!user && !demoMode) {
     redirect("/auth/login")
   }
 
-  // 取得使用者 email（如果有的話）
-  const email = user.email || "Unknown"
+  // 取得使用者 email（如果有的話），在 demo 模式下使用 fallback
+  const email = user?.email || "Guest"
 
   return (
     <div className="min-h-screen flex flex-col">
