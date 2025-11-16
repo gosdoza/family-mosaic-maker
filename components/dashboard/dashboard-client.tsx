@@ -4,34 +4,81 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from "@/com
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import Link from "next/link"
-import { Sparkles, User, Package, ArrowRight, CheckCircle2, Clock, LogOut } from "lucide-react"
+import { Sparkles, User, Package, ArrowRight, CheckCircle2, Clock, LogOut, Loader2 } from "lucide-react"
+import { useState, useEffect } from "react"
 
 interface DashboardClientProps {
   email: string
 }
 
-// Mock data for recent orders
-const mockOrders = [
-  {
-    id: "FM-2025-0001",
-    status: "Completed",
-    date: "2025-11-10",
-  },
-  {
-    id: "FM-2025-0002",
-    status: "Processing",
-    date: "2025-11-12",
-  },
-  {
-    id: "FM-2025-0003",
-    status: "Completed",
-    date: "2025-11-13",
-  },
-]
+interface Order {
+  id: string
+  jobId?: string
+  status: string
+  date?: string
+  createdAt?: string
+  amount?: number
+  currency?: string
+  paymentStatus?: "paid" | "unpaid"
+}
 
 export function DashboardClient({ email }: DashboardClientProps) {
   // Placeholder for user type (will be replaced with real data later)
   const userType = "Free" // or "Paid"
+
+  // Phase 2: State declarations for orders
+  const [recentOrders, setRecentOrders] = useState<Order[]>([])
+  const [ordersLoading, setOrdersLoading] = useState(false)
+  const [ordersError, setOrdersError] = useState<string | null>(null)
+
+  // Phase 2: useEffect to fetch orders from /api/orders
+  useEffect(() => {
+    let cancelled = false
+
+    async function loadOrders() {
+      try {
+        setOrdersLoading(true)
+        setOrdersError(null)
+
+        const res = await fetch("/api/orders")
+        if (!res.ok) {
+          throw new Error(`Failed to load orders: ${res.status}`)
+        }
+
+        const data = await res.json()
+        if (!cancelled) {
+          // Handle API response structure: { orders: [...] } or [...]
+          const list = Array.isArray(data) ? data : data.orders ?? []
+          
+          // Sort by createdAt (most recent first) and take top 3
+          const sorted = list.sort((a: Order, b: Order) => {
+            const dateA = new Date(a.createdAt || a.date || 0).getTime()
+            const dateB = new Date(b.createdAt || b.date || 0).getTime()
+            return dateB - dateA
+          })
+          
+          setRecentOrders(sorted.slice(0, 3))
+          setOrdersError(null)
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setOrdersError(err?.message ?? "Failed to load orders")
+          // Degrade gracefully - show empty state
+          setRecentOrders([])
+        }
+      } finally {
+        if (!cancelled) {
+          setOrdersLoading(false)
+        }
+      }
+    }
+
+    loadOrders()
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const getStatusBadge = (status: string) => {
     if (status === "Completed") {
@@ -157,21 +204,22 @@ export function DashboardClient({ email }: DashboardClientProps) {
           </div>
         </CardHeader>
         <CardContent>
+          {/* Phase 3: Stable Recent Orders UI with proper error handling */}
           {ordersLoading ? (
             <div className="text-center py-8">
               <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
-              <p className="text-muted-foreground">Loading orders...</p>
+              <p className="text-sm text-muted-foreground">Loading recent orders…</p>
             </div>
           ) : ordersError ? (
             <div className="text-center py-8">
               <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground text-sm">{ordersError}</p>
-              <p className="text-muted-foreground text-xs mt-2">No orders available</p>
+              <p className="text-sm text-destructive">{ordersError}</p>
+              <p className="text-xs text-muted-foreground mt-2">Failed to load recent orders. Please try again later.</p>
             </div>
-          ) : recentOrders.length === 0 ? (
+          ) : !recentOrders || recentOrders.length === 0 ? (
             <div className="text-center py-8">
               <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
-              <p className="text-muted-foreground">No orders yet</p>
+              <p className="text-sm text-muted-foreground">No orders yet. Generate a family photo to see it here.</p>
               <Link href="/generate">
                 <Button variant="outline" className="mt-4 rounded-full">
                   Create your first mosaic
