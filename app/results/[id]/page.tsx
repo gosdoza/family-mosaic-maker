@@ -35,7 +35,9 @@ function ResultsContent() {
   const router = useRouter()
   const fallbackId = searchParams.get("id") || "demo-001"
   const id = params?.id || fallbackId
-  const { user, loading: authLoading } = useAuth(true)
+  // Route A: demo-001 免登录放行，其他 jobId 需要登录
+  const isDemo = id === "demo-001"
+  const { user, loading: authLoading } = useAuth(!isDemo) // demo-001 不 redirect，其他需要登录
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -223,6 +225,11 @@ function ResultsContent() {
             <p className="mt-4 text-lg text-muted-foreground max-w-2xl mx-auto">
               Here are the beautiful images generated for your family.
             </p>
+            {isDemo && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                This is a mock demo result (jobId: demo-001).
+              </p>
+            )}
             {isPaid ? (
               <div
                 data-testid="results-paid-badge"

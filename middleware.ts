@@ -49,7 +49,16 @@ export async function middleware(request: NextRequest) {
   // Check if route is protected
   const isProtectedRoute = PROTECTED_ROUTES.some((route) => pathname.startsWith(route))
 
+  // TEMP: Allow unauthenticated access to /results/demo-001 for Route A mock demo.
+  // TODO: remove this exception when real Runware integration is ready.
+  const isResultsDemo = pathname === "/results/demo-001" || pathname.startsWith("/results/demo-001/")
+
   if (isProtectedRoute && !isMock) {
+    // Route A exception: demo-001 免登录放行
+    if (isResultsDemo) {
+      const response = NextResponse.next()
+      return addSecurityHeaders(response, request)
+    }
     // In non-mock mode, check Supabase authentication
     try {
       const supabase = createServerClient(
