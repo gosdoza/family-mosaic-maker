@@ -64,31 +64,55 @@ export async function GET(request: NextRequest) {
     }
 
     if (useMock) {
-      // Return mock orders for testing (fallback)
+      // Route D: Return mock orders for testing (fallback)
       // 確保包含 demo-001 的訂單（用於 QA 測試），狀態為 paid
+      // TODO: Replace mock /api/orders with real DB-backed orders when we integrate Stripe/PayPal fully.
       const mockOrders = [
         {
-          id: "ORD-001",
-          date: new Date().toISOString().split("T")[0],
-          status: "Completed",
-          thumbnail: "/assets/mock/family1.jpg",
-          count: 3,
-          template: "Christmas",
+          id: "ord_demo_001",
           jobId: "demo-001",
+          status: "Completed",
+          amount: 2.99,
+          currency: "USD",
+          createdAt: new Date().toISOString(),
+          date: new Date().toISOString().split("T")[0],
+          thumbnail: "/assets/mock/family1.jpg",
+          count: 2,
+          template: "Christmas",
           images: [
             { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
             { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
-            { id: 3, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
           ],
-          paymentStatus: "paid", // demo-001 訂單標記為已付費（用於 QA 測試）
+          paymentStatus: "paid", // demo-001 訂單標記為已付費（用於 Route C mock checkout）
         },
         {
-          id: "ORD-002",
-          date: "2025-01-10",
+          id: "ord_demo_002",
+          jobId: "demo-002",
           status: "Completed",
+          amount: 2.99,
+          currency: "USD",
+          createdAt: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+          date: new Date(Date.now() - 86400000).toISOString().split("T")[0],
           thumbnail: "/assets/mock/family2.jpg",
           count: 2,
           template: "Birthday",
+          images: [
+            { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+            { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+          ],
+          paymentStatus: "paid",
+        },
+        {
+          id: "ord_demo_003",
+          jobId: "demo-003",
+          status: "Completed",
+          amount: 2.99,
+          currency: "USD",
+          createdAt: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
+          date: new Date(Date.now() - 172800000).toISOString().split("T")[0],
+          thumbnail: "/assets/mock/family1.jpg",
+          count: 2,
+          template: "Wedding",
           images: [
             { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
             { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
@@ -99,13 +123,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ orders: mockOrders })
     }
 
-    // Get current user
+    // Route D: In mock mode, allow access without auth (for demo-001)
+    // TODO: Remove this exception when real orders integration is ready
+    // Get current user (optional in mock mode)
     const supabase = await createClient()
     const {
       data: { user },
     } = await supabase.auth.getUser()
 
-    if (!user) {
+    // Only require auth in non-mock mode
+    if (!useMock && !user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
     }
 

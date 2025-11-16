@@ -13,14 +13,18 @@ import Link from "next/link"
 
 interface Order {
   id: string
+  jobId?: string
   date: string
+  createdAt?: string
   status: string
-  thumbnail: string
-  count: number
-  template: string
+  thumbnail?: string
+  count?: number
+  template?: string
   style?: string
   paymentStatus: "paid" | "unpaid"
-  jobId?: string
+  amount?: number
+  currency?: string
+  images?: Array<{ id: number | string; url: string; thumbnail: string }>
 }
 
 export default function OrdersPage() {
@@ -28,12 +32,15 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const { user, loading: authLoading } = useAuth(true)
+  // Route D: Allow demo-001 without auth (mock mode)
+  const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
+  const { user, loading: authLoading } = useAuth(!isMock) // Only require auth in non-mock mode
   const router = useRouter()
 
   // Fetch orders from API
   useEffect(() => {
-    if (authLoading || !user) return
+    // In mock mode, allow fetching without user
+    if (!isMock && (authLoading || !user)) return
 
     async function fetchOrders() {
       try {
@@ -55,7 +62,7 @@ export default function OrdersPage() {
     }
 
     fetchOrders()
-  }, [authLoading, user])
+  }, [authLoading, user, isMock])
 
   const filteredOrders = orders.filter((order) => {
     if (filter === "All") return true
@@ -79,7 +86,8 @@ export default function OrdersPage() {
     )
   }
 
-  if (!user) {
+  // Route D: In mock mode, allow access without user
+  if (!isMock && !user) {
     return null // Will redirect via useAuth
   }
 
@@ -97,8 +105,15 @@ export default function OrdersPage() {
               <h1 className="text-4xl sm:text-5xl font-bold text-balance">
                 Your{" "}
                 <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Orders</span>
+                {isMock && (
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">(Mock Demo)</span>
+                )}
               </h1>
-              <p className="text-lg text-muted-foreground text-pretty">Access all your generated family mosaics</p>
+              <p className="text-lg text-muted-foreground text-pretty">
+                {isMock 
+                  ? "Demo data tied to jobId=demo-001. This is mock order history for testing."
+                  : "Access all your generated family mosaics"}
+              </p>
             </div>
 
             {/* Filter Buttons */}
@@ -148,18 +163,23 @@ export default function OrdersPage() {
                         <div className="flex items-start justify-between gap-4">
                           <div>
                             <div className="flex items-center gap-3 mb-1">
-                              <h3 className="font-semibold text-lg">{order.id}</h3>
+                              <h3 className="font-semibold text-lg">{order.jobId || order.id}</h3>
                               <span className="text-2xl">
                                 {order.template === "Christmas" ? "🎄" : order.template === "Birthday" ? "🎂" : order.template === "Wedding" ? "💒" : "📸"}
                               </span>
                             </div>
                             <p className="text-sm text-muted-foreground">
-                              {new Date(order.date).toLocaleDateString("en-US", {
+                              {new Date(order.date || order.createdAt || Date.now()).toLocaleDateString("en-US", {
                                 year: "numeric",
                                 month: "long",
                                 day: "numeric",
                               })}
                             </p>
+                            {order.amount && (
+                              <p className="text-sm font-medium text-muted-foreground mt-1">
+                                ${order.amount.toFixed(2)} {order.currency || "USD"}
+                              </p>
+                            )}
                           </div>
                           <div className="flex flex-col gap-2 items-end">
                             <Badge
@@ -196,7 +216,7 @@ export default function OrdersPage() {
                             {order.status === "Completed" || order.status === "completed" ? (
                               <a
                                 {...(process.env.NODE_ENV !== "production" ? { "data-testid": "order-view-link" } : {})}
-                                href={`/results?id=${order.jobId || order.id}${order.paymentStatus === "paid" ? "&paid=1" : ""}`}
+                                href={`/results/${order.jobId || order.id}${order.paymentStatus === "paid" ? "?paid=1" : ""}`}
                                 className="inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 h-9 px-4"
                               >
                                 <Download className="w-4 h-4 mr-2" />

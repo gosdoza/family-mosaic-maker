@@ -157,7 +157,18 @@ export function DashboardClient({ email }: DashboardClientProps) {
           </div>
         </CardHeader>
         <CardContent>
-          {mockOrders.length === 0 ? (
+          {ordersLoading ? (
+            <div className="text-center py-8">
+              <Loader2 className="w-8 h-8 animate-spin text-primary mx-auto mb-4" />
+              <p className="text-muted-foreground">Loading orders...</p>
+            </div>
+          ) : ordersError ? (
+            <div className="text-center py-8">
+              <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
+              <p className="text-muted-foreground text-sm">{ordersError}</p>
+              <p className="text-muted-foreground text-xs mt-2">No orders available</p>
+            </div>
+          ) : recentOrders.length === 0 ? (
             <div className="text-center py-8">
               <Package className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-50" />
               <p className="text-muted-foreground">No orders yet</p>
@@ -169,7 +180,8 @@ export function DashboardClient({ email }: DashboardClientProps) {
             </div>
           ) : (
             <div className="space-y-4">
-              {mockOrders.map((order) => (
+              {/* TODO: Replace mock /api/orders with real DB-backed orders when we integrate Stripe/PayPal fully. */}
+              {recentOrders.map((order) => (
                 <div
                   key={order.id}
                   className="flex items-center justify-between p-4 rounded-lg bg-background/50 border border-border hover:bg-background/70 transition-colors"
@@ -179,19 +191,31 @@ export function DashboardClient({ email }: DashboardClientProps) {
                       <Package className="w-4 h-4 text-primary" />
                     </div>
                     <div>
-                      <p className="font-semibold">{order.id}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {new Date(order.date).toLocaleDateString("en-US", {
-                          year: "numeric",
-                          month: "short",
-                          day: "numeric",
-                        })}
-                      </p>
+                      <p className="font-semibold">{order.jobId || order.id}</p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <p className="text-sm text-muted-foreground">
+                          {new Date(order.date || order.createdAt || Date.now()).toLocaleDateString("en-US", {
+                            year: "numeric",
+                            month: "short",
+                            day: "numeric",
+                          })}
+                        </p>
+                        {order.amount && (
+                          <span className="text-sm font-medium">
+                            ${order.amount.toFixed(2)} {order.currency || "USD"}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
                     {getStatusBadge(order.status)}
-                    <Link href={`/orders`}>
+                    {order.paymentStatus && (
+                      <Badge variant={order.paymentStatus === "paid" ? "default" : "outline"} className="rounded-full">
+                        {order.paymentStatus === "paid" ? "Paid" : "Unpaid"}
+                      </Badge>
+                    )}
+                    <Link href={`/results/${order.jobId || order.id}${order.paymentStatus === "paid" ? "?paid=1" : ""}`}>
                       <Button variant="ghost" size="sm" className="gap-1">
                         View
                         <ArrowRight className="w-3 h-3" />
