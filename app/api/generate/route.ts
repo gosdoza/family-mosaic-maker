@@ -160,8 +160,44 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // 如果使用 Mock Provider，直接呼叫
-    if (provider.name === "mock") {
+    // RUNWARE-NOTE: Check if template + style combination is supported by RunwareProvider
+    // Only "christmas" + "realistic" is supported, others fallback to mock
+    const isRunwareSupported = template === "christmas" && style === "realistic"
+    
+    // 如果使用 Runware Provider 且 template/style 組合支援
+    if (provider.name === "runware" && isRunwareSupported) {
+      try {
+        const fileUrls = await getFileUrls(files, user.id)
+        // 將 userId 傳入 payload（provider 可能需要）
+        const payload = { files: fileUrls, style, template, userId: user.id, requestId }
+        const { jobId } = await provider.generate(payload)
+        
+        // 记录 gen_ok 事件（Runware 模式）
+        await logAnalyticsEvent({
+          event_type: "gen_ok",
+          request_id: requestId,
+          user_id: user.id,
+          data: {
+            job_id: jobId,
+            mode: "runware",
+            model_provider: "runware",
+            model_id: null,
+            template,
+            style,
+          },
+        })
+
+        return NextResponse.json({ ok: true, jobId, request_id: requestId })
+      } catch (error: any) {
+        // RUNWARE-NOTE: If RunwareProvider throws (e.g., template not supported), fallback to mock
+        console.warn("[generate] RunwareProvider failed, falling back to mock:", error.message)
+        // Fall through to mock provider below
+      }
+    }
+
+    // 如果使用 Mock Provider，或 Runware 不支援此 template/style 組合
+    // RUNWARE-NOTE: Mock provider handles all cases, including unsupported Runware combinations
+    if (provider.name === "mock" || !isRunwareSupported) {
       const fileUrls = files.map(f => f.name || "")
       const { jobId } = await provider.generate({ files: fileUrls, style, template })
       
@@ -175,29 +211,9 @@ export async function POST(request: NextRequest) {
           mode: "mock",
           model_provider: "mock",
           model_id: null,
-        },
-      })
-
-      return NextResponse.json({ ok: true, jobId, request_id: requestId })
-    }
-
-    // 如果使用 Runware Provider
-    if (provider.name === "runware") {
-      const fileUrls = await getFileUrls(files, user.id)
-      // 將 userId 傳入 payload（provider 可能需要）
-      const payload = { files: fileUrls, style, template, userId: user.id, requestId }
-      const { jobId } = await provider.generate(payload)
-      
-      // 记录 gen_ok 事件（Runware 模式）
-      await logAnalyticsEvent({
-        event_type: "gen_ok",
-        request_id: requestId,
-        user_id: user.id,
-        data: {
-          job_id: jobId,
-          mode: "runware",
-          model_provider: "runware",
-          model_id: null,
+          template,
+          style,
+          fallback_reason: provider.name === "runware" && !isRunwareSupported ? "template_not_supported" : undefined,
         },
       })
 

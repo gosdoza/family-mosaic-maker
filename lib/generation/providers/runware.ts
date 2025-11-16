@@ -2,11 +2,14 @@
  * Runware Provider
  * 
  * 實作 Runware API 的 GenerationProvider
+ * RUNWARE-NOTE: Uses template config to map (template, style) -> Runware model + prompts
  */
 
 import { GenerationProvider, GenerateRequestPayload, GenerateResult, ProgressResult, ResultsResult } from "./base"
 import { callRunwareAPI, RunwareGenerateRequest } from "../runware-client"
 import { createClient as createServiceClient } from "@supabase/supabase-js"
+import { resolveRunwareTemplate } from "@/lib/templates/runware-templates"
+import { isDemoMode } from "@/lib/featureFlags"
 
 const RUNWARE_API_KEY = process.env.RUNWARE_API_KEY
 const RUNWARE_BASE_URL = process.env.RUNWARE_BASE_URL || "https://api.runware.ai"
@@ -87,11 +90,31 @@ export class RunwareProvider implements GenerationProvider {
   name: "runware" = "runware"
 
   async generate(input: GenerateRequestPayload): Promise<GenerateResult> {
+    // RUNWARE-NOTE: Resolve template config for (template, style) combination
+    const templateConfig = resolveRunwareTemplate(input.template, input.style)
+    
+    if (!templateConfig) {
+      // RUNWARE-TODO: 之後可以 fallback 到 mock 或丟出更清楚的錯誤
+      throw new Error(
+        `Runware template not configured for template=${input.template}, style=${input.style}. Only "christmas" + "realistic" is supported.`
+      )
+    }
+
+    // RUNWARE-NOTE: In demo mode, return placeholder jobId without calling Runware API
+    if (isDemoMode) {
+      // demo 下先不要真的打 Runware，避免產生成本
+      return {
+        ok: true,
+        jobId: `runware-demo-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+      }
+    }
+
     if (!RUNWARE_API_KEY) {
       throw new Error("RUNWARE_API_KEY is not configured")
     }
 
-    // 1. 呼叫 Runware API 創建 job
+    // RUNWARE-TODO: build Runware API payload using templateConfig + input
+    // 目前先使用現有的 callRunwareAPI，之後可以根據 templateConfig 調整 prompt
     const runwareRequest: RunwareGenerateRequest = {
       files: input.files,
       style: input.style,
@@ -99,8 +122,12 @@ export class RunwareProvider implements GenerationProvider {
       resolution: input.resolution,
       steps: input.steps,
       grayscale_ratio: input.grayscale_ratio,
+      // RUNWARE-TODO: Use templateConfig.basePrompt and templateConfig.modelId
+      // prompt: templateConfig.basePrompt,
+      // model: templateConfig.modelId,
     }
 
+    // RUNWARE-TODO: call real Runware API here
     const runwareResponse = await callRunwareAPI(runwareRequest, {
       timeout: 8000,
       maxRetries: 2,

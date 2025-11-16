@@ -36,13 +36,18 @@ NEXT_PUBLIC_DEMO_MODE=true
 
 **允許的值**:
 - `"mock"`: 使用 Mock Provider（預設）
-- `"real"`: 使用真實 Runware API
+- `"real"`: 使用真實 Runware API（僅支援 "christmas" + "realistic" 組合）
 
 **範例**:
 ```bash
 NEXT_PUBLIC_RUNWARE_MODE=mock
 NEXT_PUBLIC_RUNWARE_MODE=real
 ```
+
+**RUNWARE-NOTE**: 
+- 當 `NEXT_PUBLIC_RUNWARE_MODE=real` 時，只有 `template="christmas"` 且 `style="realistic"` 的組合會使用 RunwareProvider
+- 其他 template/style 組合會自動 fallback 到 MockProvider
+- 在 demo mode (`isDemoMode=true`) 下，即使使用 RunwareProvider 也不會真正調用 Runware API，而是返回 placeholder jobId
 
 ### 3. `NEXT_PUBLIC_PAYPAL_MODE`
 
