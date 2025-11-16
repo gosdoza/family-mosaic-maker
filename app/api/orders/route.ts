@@ -4,11 +4,113 @@ import { createClient } from "@/lib/supabase/server"
 import e2eStore from "@/lib/e2eStore"
 
 export async function GET(request: NextRequest) {
+  // Phase 1: Temporary console logging for debugging
+  console.log("[api/orders] GET request", {
+    url: request.url,
+    method: request.method,
+  })
+
   try {
     const searchParams = request.nextUrl.searchParams
     const jobId = searchParams.get("jobId")
 
-    // Check if we're using mock mode
+    // Phase 2: Early guard for demo/mock mode - detect preview or mock
+    // TEMP (Route D mock): Be generous in preview to avoid 500s
+    // TODO: tighten this when we wire real DB + PayPal
+    const isDemo =
+      process.env.NEXT_PUBLIC_USE_MOCK === "true" ||
+      process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
+      process.env.VERCEL_ENV === "preview"
+
+    console.log("[api/orders] mode check", {
+      isDemo,
+      NEXT_PUBLIC_USE_MOCK: process.env.NEXT_PUBLIC_USE_MOCK,
+      NEXT_PUBLIC_VERCEL_ENV: process.env.NEXT_PUBLIC_VERCEL_ENV,
+      VERCEL_ENV: process.env.VERCEL_ENV,
+      jobId,
+    })
+
+    // Phase 2: Early return for demo mode - never touch Supabase/DB
+    if (isDemo) {
+      console.log("[api/orders] returning mock orders (demo mode)")
+      
+      // If jobId is provided, return single order by jobId (for results page)
+      if (jobId) {
+        // For demo-001, return a mock order
+        if (jobId === "demo-001") {
+          return NextResponse.json({
+            order: {
+              id: "ord_demo_001",
+              job_id: "demo-001",
+              status: "paid",
+              paypal_capture_id: "mock-capture",
+              paypal_order_id: "mock-order",
+            },
+          })
+        }
+        // Other jobIds return null in demo
+        return NextResponse.json({ order: null })
+      }
+
+      // Return mock orders list for demo
+      const mockOrders = [
+        {
+          id: "ord_demo_001",
+          jobId: "demo-001",
+          status: "Completed",
+          amount: 2.99,
+          currency: "USD",
+          paymentStatus: "paid",
+          createdAt: new Date().toISOString(),
+          date: new Date().toISOString().split("T")[0],
+          template: "Christmas",
+          thumbnail: "/assets/mock/family1.jpg",
+          count: 2,
+          images: [
+            { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+            { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+          ],
+        },
+        {
+          id: "ord_demo_002",
+          jobId: "demo-002",
+          status: "Completed",
+          amount: 2.99,
+          currency: "USD",
+          paymentStatus: "paid",
+          createdAt: new Date(Date.now() - 86400000).toISOString(), // 1 day ago
+          date: new Date(Date.now() - 86400000).toISOString().split("T")[0],
+          template: "Birthday",
+          thumbnail: "/assets/mock/family2.jpg",
+          count: 2,
+          images: [
+            { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+            { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+          ],
+        },
+        {
+          id: "ord_demo_003",
+          jobId: "demo-003",
+          status: "Completed",
+          amount: 2.99,
+          currency: "USD",
+          paymentStatus: "paid",
+          createdAt: new Date(Date.now() - 172800000).toISOString(), // 2 days ago
+          date: new Date(Date.now() - 172800000).toISOString().split("T")[0],
+          template: "Wedding",
+          thumbnail: "/assets/mock/family1.jpg",
+          count: 2,
+          images: [
+            { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+            { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+          ],
+        },
+      ]
+
+      return NextResponse.json({ orders: mockOrders })
+    }
+
+    // Check if we're using mock mode (legacy check, kept for backward compatibility)
     const useMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
 
     // If jobId is provided, return single order by jobId (for results page)
@@ -123,78 +225,89 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ orders: mockOrders })
     }
 
+    // Phase 2: Non-demo path - wrap in try/catch to prevent 500s
     // Route D: In mock mode, allow access without auth (for demo-001)
     // TODO: Remove this exception when real orders integration is ready
-    // Get current user (optional in mock mode)
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    try {
+      // Get current user (optional in mock mode)
+      const supabase = await createClient()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
 
-    // Only require auth in non-mock mode
-    if (!useMock && !user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    // Fetch orders from database
-    const { data: orders, error } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,
-        created_at,
-        payment_status,
-        status,
-        job_id,
-        jobs (
-          id,
-          template,
-          style,
-          status,
-          job_images (
-            id,
-            url,
-            thumbnail_url
-          )
-        )
-      `
-      )
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false })
-
-    if (error) {
-      console.error("Error fetching orders:", error)
-      return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 })
-    }
-
-    // Format orders to match frontend structure
-    const formattedOrders = (orders || []).map((order: any) => {
-      const job = order.jobs?.[0] || {}
-      const images = job.job_images || []
-
-      return {
-        id: order.id,
-        date: new Date(order.created_at).toISOString().split("T")[0],
-        status: job.status || order.status || "Completed",
-        thumbnail: images[0]?.thumbnail_url || images[0]?.url || "/placeholder.svg",
-        count: images.length,
-        template: job.template || "Unknown",
-        style: job.style || undefined,
-        jobId: order.job_id || job.id,
-        images: images.map((img: any) => ({
-          id: img.id,
-          url: img.url,
-          thumbnail: img.thumbnail_url || img.url,
-        })),
-        paymentStatus: order.status === "paid" ? "paid" : (order.payment_status || "unpaid"),
+      // Only require auth in non-mock mode
+      if (!useMock && !user) {
+        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
       }
-    })
 
-    return NextResponse.json({ orders: formattedOrders })
-  } catch (error) {
-    console.error("Error in orders API:", error)
+      // Fetch orders from database
+      const { data: orders, error } = await supabase
+        .from("orders")
+        .select(
+          `
+          id,
+          created_at,
+          payment_status,
+          status,
+          job_id,
+          jobs (
+            id,
+            template,
+            style,
+            status,
+            job_images (
+              id,
+              url,
+              thumbnail_url
+            )
+          )
+        `
+        )
+        .eq("user_id", user?.id || "")
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("[api/orders] error fetching from DB:", error)
+        return NextResponse.json({ error: "Failed to fetch orders" }, { status: 500 })
+      }
+
+      // Format orders to match frontend structure
+      const formattedOrders = (orders || []).map((order: any) => {
+        const job = order.jobs?.[0] || {}
+        const images = job.job_images || []
+
+        return {
+          id: order.id,
+          date: new Date(order.created_at).toISOString().split("T")[0],
+          status: job.status || order.status || "Completed",
+          thumbnail: images[0]?.thumbnail_url || images[0]?.url || "/placeholder.svg",
+          count: images.length,
+          template: job.template || "Unknown",
+          style: job.style || undefined,
+          jobId: order.job_id || job.id,
+          images: images.map((img: any) => ({
+            id: img.id,
+            url: img.url,
+            thumbnail: img.thumbnail_url || img.url,
+          })),
+          paymentStatus: order.status === "paid" ? "paid" : (order.payment_status || "unpaid"),
+        }
+      })
+
+      return NextResponse.json({ orders: formattedOrders })
+    } catch (dbError: any) {
+      // Phase 2: Controlled error handling - log but return controlled 500
+      console.error("[api/orders] error", dbError)
+      return NextResponse.json(
+        { error: "Internal Server Error" },
+        { status: 500 }
+      )
+    }
+  } catch (error: any) {
+    // Phase 2: Top-level catch - should not be hit in demo mode, but safety net
+    console.error("[api/orders] top-level error:", error)
     return NextResponse.json(
-      { error: "Failed to fetch orders" },
+      { error: "Internal Server Error" },
       { status: 500 }
     )
   }

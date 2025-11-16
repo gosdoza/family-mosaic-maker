@@ -32,15 +32,20 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  // Route D: Allow demo-001 without auth (mock mode)
-  const isMock = process.env.NEXT_PUBLIC_USE_MOCK === "true"
-  const { user, loading: authLoading } = useAuth(!isMock) // Only require auth in non-mock mode
+  // Phase 3: Route D - Allow demo/mock mode without forced login
+  // TEMP (Route D mock): Allow /orders in preview without auth
+  // TODO: tighten this when we wire real DB + PayPal
+  const isMockDemo =
+    process.env.NEXT_PUBLIC_USE_MOCK === "true" ||
+    process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
+    process.env.VERCEL_ENV === "preview"
+  const { user, loading: authLoading } = useAuth(!isMockDemo) // Only require auth in non-demo mode
   const router = useRouter()
 
   // Fetch orders from API
   useEffect(() => {
-    // In mock mode, allow fetching without user
-    if (!isMock && (authLoading || !user)) return
+    // In mock demo mode, allow fetching without user
+    if (!isMockDemo && (authLoading || !user)) return
 
     async function fetchOrders() {
       try {
@@ -62,7 +67,7 @@ export default function OrdersPage() {
     }
 
     fetchOrders()
-  }, [authLoading, user, isMock])
+  }, [authLoading, user, isMockDemo])
 
   const filteredOrders = orders.filter((order) => {
     if (filter === "All") return true
@@ -86,8 +91,8 @@ export default function OrdersPage() {
     )
   }
 
-  // Route D: In mock mode, allow access without user
-  if (!isMock && !user) {
+  // Phase 3: In mock demo mode, allow access without user
+  if (!isMockDemo && !user) {
     return null // Will redirect via useAuth
   }
 
@@ -105,12 +110,14 @@ export default function OrdersPage() {
               <h1 className="text-4xl sm:text-5xl font-bold text-balance">
                 Your{" "}
                 <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">Orders</span>
-                {isMock && (
-                  <span className="ml-2 text-sm font-normal text-muted-foreground">(Mock Demo)</span>
+                {isMockDemo && (
+                  <Badge variant="outline" className="ml-2 text-xs">
+                    Mock demo (no login required)
+                  </Badge>
                 )}
               </h1>
               <p className="text-lg text-muted-foreground text-pretty">
-                {isMock 
+                {isMockDemo 
                   ? "Demo data tied to jobId=demo-001. This is mock order history for testing."
                   : "Access all your generated family mosaics"}
               </p>
