@@ -10,6 +10,9 @@ const PROTECTED_ROUTES = ["/orders", "/results", "/settings"]
 // 這些路由應該永遠是公開的，用於健康檢查等用途
 const PUBLIC_API_ROUTES = ["/api/version", "/api/health"]
 
+// Helper: Check if we're in Vercel preview environment
+const isPreviewEnv = process.env.VERCEL_ENV === "preview"
+
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname
 
@@ -49,47 +52,56 @@ export async function middleware(request: NextRequest) {
   // Check if route is protected
   const isProtectedRoute = PROTECTED_ROUTES.some((route) => pathname.startsWith(route))
 
-  // TEMP: Allow unauthenticated access to /results/demo-001 for Route A mock demo.
-  // TODO: remove this exception when real Runware integration is ready.
-  const isResultsDemo = pathname === "/results/demo-001" || pathname.startsWith("/results/demo-001/")
+  // Route A / C / D demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問
+  // TEMP (Route D mock): Preview demo exceptions
+  // TODO: remove these exceptions when we wire real DB + PayPal
+  const isResultsDemo =
+    pathname === "/results/demo-001" || pathname.startsWith("/results/demo-001")
+  const isOrdersDemo = pathname === "/orders"
 
-  if (isProtectedRoute && !isMock) {
-    // Route A exception: demo-001 免登录放行
-    if (isResultsDemo) {
-      const response = NextResponse.next()
-      return addSecurityHeaders(response, request)
+  if (isProtectedRoute) {
+    // Preview demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問
+    // TEMP (Route D mock): Preview demo exceptions
+    // TODO: remove these exceptions when we wire real DB + PayPal
+    if (isPreviewEnv && (isOrdersDemo || isResultsDemo)) {
+      const res = NextResponse.next()
+      return addSecurityHeaders(res, request)
     }
+
+    // 其他情況維持原本邏輯（要登入才能看）
     // In non-mock mode, check Supabase authentication
-    try {
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return request.cookies.getAll()
+    if (!isMock) {
+      try {
+        const supabase = createServerClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          {
+            cookies: {
+              getAll() {
+                return request.cookies.getAll()
+              },
+              setAll(cookiesToSet) {
+                // Cookies will be set by the response
+              },
             },
-            setAll(cookiesToSet) {
-              // Cookies will be set by the response
-            },
-          },
+          }
+        )
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!user) {
+          // Redirect to login if not authenticated (307 Temporary Redirect)
+          const loginUrl = new URL("/auth/login", request.url)
+          loginUrl.searchParams.set("redirect", pathname)
+          const response = NextResponse.redirect(loginUrl, { status: 307 })
+          return addSecurityHeaders(response, request)
         }
-      )
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        // Redirect to login if not authenticated (307 Temporary Redirect)
-        const loginUrl = new URL("/auth/login", request.url)
-        loginUrl.searchParams.set("redirect", pathname)
-        const response = NextResponse.redirect(loginUrl, { status: 307 })
-        return addSecurityHeaders(response, request)
+      } catch (error) {
+        // If Supabase is not configured, allow access (for development)
+        console.warn("Supabase auth check failed:", error)
       }
-    } catch (error) {
-      // If Supabase is not configured, allow access (for development)
-      console.warn("Supabase auth check failed:", error)
     }
   }
 
