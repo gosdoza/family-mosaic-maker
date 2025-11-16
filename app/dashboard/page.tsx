@@ -3,11 +3,12 @@ import { getCurrentUser } from "@/lib/supabase/server"
 import { Navigation } from "@/components/navigation"
 import { Footer } from "@/components/footer"
 import { DashboardClient } from "@/components/dashboard/dashboard-client"
-import { isDemoMode, isPreviewEnv } from "@/lib/featureFlags"
+import { isPreviewEnv } from "@/lib/featureFlags"
 
 export default async function DashboardPage() {
   // NOTE: In preview demo mode we allow anonymous visitors to see dashboard + mock orders (Route D)
-  const demoMode = isDemoMode && isPreviewEnv
+  // In Vercel Preview environment, always allow access to /dashboard without login
+  const demoMode = isPreviewEnv
 
   // 使用 server-side 方式取得目前登入的使用者
   const user = await getCurrentUser()
@@ -18,7 +19,7 @@ export default async function DashboardPage() {
   }
 
   // 取得使用者 email（如果有的話），在 demo 模式下使用 fallback
-  const email = user?.email || "Guest"
+  const email = user?.email || (demoMode ? "Guest" : "Unknown")
 
   return (
     <div className="min-h-screen flex flex-col">
