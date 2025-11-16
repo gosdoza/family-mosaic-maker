@@ -14,6 +14,7 @@ import { useAuth } from "@/lib/useAuth"
 import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
 import { trackMetric } from "@/lib/metrics"
+import { isDemoJob } from "@/lib/featureFlags"
 
 type ResultImage = { id: number | string; url: string; thumbnail: string }
 
