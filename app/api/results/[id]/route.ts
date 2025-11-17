@@ -39,11 +39,60 @@ export async function GET(
       })
     }
 
-    // Check provider type (new system with backward compatibility)
+    // Route B: Use provider system (Mock or Runware)
+    // Check if job is from Runware (non-demo job) and runwareMode is enabled
+    const { runwareMode, isPreviewEnv } = await import("@/lib/featureFlags")
+    const isRunwareJob = !isDemoJob(jobId) && runwareMode === "real"
     const providerType = getProviderType()
-    const useMock = providerType === "mock"
+    const useMock = providerType === "mock" || isPreviewEnv
 
-    if (useMock) {
+    // If it's a Runware job, try to use RunwareProvider
+    if (isRunwareJob && !useMock) {
+      try {
+        const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
+        const runwareProvider = createRunwareProvider()
+        
+        const requestUrl = new URL(request.url)
+        const paidParam = requestUrl.searchParams.get("paid")
+        const isPaid = paidParam === "1" || paidParam === "true"
+        
+        const results = await runwareProvider.getResults(jobId, { paid: isPaid })
+        
+        // Normalize results format to match existing API response
+        const normalizedImages = results.images.map((url, idx) => ({
+          id: idx + 1,
+          url,
+          thumbnail: url, // Runware may not have thumbnails, use full URL
+        }))
+        
+        // Log results_ok event
+        const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+        await logAnalyticsEvent({
+          event_type: "results_ok",
+          request_id: requestId,
+          job_id: jobId,
+          user_id: null, // TODO: get user from auth if needed
+          data: {
+            image_count: normalizedImages.length,
+            model_provider: "runware",
+            model_id: null,
+            payment_status: results.paymentStatus,
+          },
+        })
+        
+        return NextResponse.json({
+          jobId,
+          images: normalizedImages,
+          paymentStatus: results.paymentStatus || "unpaid",
+          createdAt: new Date().toISOString(),
+        })
+      } catch (error: any) {
+        console.error("[results] RunwareProvider failed, falling back to mock:", error)
+        // Fall through to mock provider below
+      }
+    }
+
+    if (useMock || !isRunwareJob) {
       // Mock 模式：嘗試使用 MockProvider，但保留現有邏輯作為 fallback
       // 因為 results API 有複雜的支付狀態、品質分數等邏輯
       // 暫時保留現有實作，確保行為一致

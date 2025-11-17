@@ -94,7 +94,7 @@ export class RunwareProvider implements GenerationProvider {
     const templateConfig = resolveRunwareTemplate(input.template, input.style)
     
     if (!templateConfig) {
-      // RUNWARE-TODO: 之後可以 fallback 到 mock 或丟出更清楚的錯誤
+      // This should be caught by /api/generate and fallback to mock
       throw new Error(
         `Runware template not configured for template=${input.template}, style=${input.style}. Only "christmas" + "realistic" is supported.`
       )
@@ -110,53 +110,72 @@ export class RunwareProvider implements GenerationProvider {
     }
 
     if (!RUNWARE_API_KEY) {
+      // This should be caught by /api/generate and fallback to mock
       throw new Error("RUNWARE_API_KEY is not configured")
     }
 
-    // RUNWARE-TODO: build Runware API payload using templateConfig + input
-    // 目前先使用現有的 callRunwareAPI，之後可以根據 templateConfig 調整 prompt
-    const runwareRequest: RunwareGenerateRequest = {
-      files: input.files,
-      style: input.style,
-      template: input.template,
-      resolution: input.resolution,
-      steps: input.steps,
-      grayscale_ratio: input.grayscale_ratio,
-      // RUNWARE-TODO: Use templateConfig.basePrompt and templateConfig.modelId
-      // prompt: templateConfig.basePrompt,
-      // model: templateConfig.modelId,
-    }
-
-    // RUNWARE-TODO: call real Runware API here
-    const runwareResponse = await callRunwareAPI(runwareRequest, {
-      timeout: 8000,
-      maxRetries: 2,
-    })
-
-    const jobId = runwareResponse.jobId
-
-    // 2. 將 job 存儲到 Supabase jobs 表（如果可能）
-    // 注意：如果沒有 userId，我們仍然返回 jobId（因為 Runware 已經創建了 job）
     try {
-      const serviceClient = getServiceClient()
-      // 嘗試從 input 中獲取 userId（如果有的話）
-      const userId = (input as any).userId || "system"
-      
-      await serviceClient.from("jobs").insert({
-        id: jobId,
-        user_id: userId,
+      // Build Runware API payload using templateConfig + input
+      // Use template config's basePrompt and modelId
+      const runwareRequest: RunwareGenerateRequest = {
+        files: input.files,
         style: input.style,
         template: input.template,
-        status: "pending",
-        progress: 0,
-        created_at: new Date().toISOString(),
-      })
-    } catch (dbError) {
-      console.error("Error storing job to database:", dbError)
-      // 即使資料庫存儲失敗，也返回 jobId（因為 Runware 已經創建了 job）
-    }
+        resolution: input.resolution || templateConfig.width, // Use template config width/height as default
+        steps: input.steps,
+        grayscale_ratio: input.grayscale_ratio,
+        // Use template config prompt and model
+        prompt: templateConfig.basePrompt,
+        model: templateConfig.modelId,
+        negativePrompt: templateConfig.negativePrompt,
+        width: templateConfig.width,
+        height: templateConfig.height,
+      }
 
-    return { ok: true, jobId }
+      // Call real Runware API
+      const runwareResponse = await callRunwareAPI(runwareRequest, {
+        timeout: 8000,
+        maxRetries: 2,
+      })
+
+      const jobId = runwareResponse.jobId
+
+      if (!jobId) {
+        throw new Error("Runware API returned empty jobId")
+      }
+
+      // 2. 將 job 存儲到 Supabase jobs 表（如果可能）
+      // 注意：如果沒有 userId，我們仍然返回 jobId（因為 Runware 已經創建了 job）
+      try {
+        const serviceClient = getServiceClient()
+        // 嘗試從 input 中獲取 userId（如果有的話）
+        const userId = (input as any).userId || "system"
+        
+        await serviceClient.from("jobs").insert({
+          id: jobId,
+          user_id: userId,
+          style: input.style,
+          template: input.template,
+          status: "pending",
+          progress: 0,
+          created_at: new Date().toISOString(),
+        })
+      } catch (dbError) {
+        console.error("Error storing job to database:", dbError)
+        // 即使資料庫存儲失敗，也返回 jobId（因為 Runware 已經創建了 job）
+      }
+
+      return { ok: true, jobId }
+    } catch (error: any) {
+      // Custom error for Runware API failures
+      const runwareError = new Error(
+        `Runware API error: ${error.message || "Unknown error"}`
+      ) as any
+      runwareError.name = "RunwareGenerateError"
+      runwareError.status = error.status || 500
+      runwareError.originalError = error
+      throw runwareError
+    }
   }
 
   async getProgress(jobId: string): Promise<ProgressResult> {

@@ -14,6 +14,12 @@ export interface RunwareGenerateRequest {
   resolution?: number
   steps?: number
   grayscale_ratio?: number
+  // Extended fields for template config support
+  prompt?: string // Override prompt from template config
+  model?: string // Override model from template config
+  negativePrompt?: string // Negative prompt from template config
+  width?: number // Image width from template config
+  height?: number // Image height from template config
 }
 
 export interface RunwareGenerateResponse {
@@ -62,8 +68,11 @@ export async function callRunwareAPI(
       const method = "POST"
       
       // 将 RunwareGenerateRequest 转换为 Runware API 需要的格式
-      // 将 style 和 template 组合成 prompt
-      const prompt = `${request.style} ${request.template}`.trim()
+      // Use template config prompt if provided, otherwise fallback to style + template
+      const prompt = request.prompt || `${request.style} ${request.template}`.trim()
+      
+      // Use template config model if provided, otherwise fallback to "default"
+      const model = request.model || "default"
       
       // 使用第一个文件 URL 作为 image_url（如果有且是有效 URL）
       let imageUrl: string | undefined = undefined
@@ -84,8 +93,11 @@ export async function callRunwareAPI(
       const runwarePayload: RunwarePayload = {
         taskType: "imageInference",
         prompt,
-        model: "default",
+        model,
         ...(imageUrl && { image_url: imageUrl }),
+        ...(request.negativePrompt && { negativePrompt: request.negativePrompt }),
+        ...(request.width && { width: request.width }),
+        ...(request.height && { height: request.height }),
       }
       
       // Runware API 要求 payload 必须是数组格式

@@ -43,12 +43,27 @@ export async function GET(
       })
     }
 
-    // Check provider type (new system with backward compatibility)
-    const providerType = getProviderType()
-    const useMock = providerType === "mock"
-
-    // 使用 Provider 系統
-    const provider = getGenerationProvider()
+    // Route B: Use provider system (Mock or Runware)
+    // Check if job is from Runware (non-demo job) and runwareMode is enabled
+    const { runwareMode, isPreviewEnv } = await import("@/lib/featureFlags")
+    const isRunwareJob = !isDemoJob(jobId) && runwareMode === "real"
+    
+    // Determine which provider to use
+    // - demo-001: always use mock (already handled above)
+    // - Runware job: use RunwareProvider if enabled
+    // - Others: use MockProvider
+    let provider = getGenerationProvider()
+    
+    // If it's a Runware job but provider is mock, try to get RunwareProvider
+    if (isRunwareJob && provider.name === "mock") {
+      try {
+        const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
+        provider = createRunwareProvider()
+      } catch (error) {
+        // If RunwareProvider creation fails (e.g., missing API key), fallback to mock
+        console.warn("[progress] Failed to create RunwareProvider, using mock:", error)
+      }
+    }
     
     try {
       const progress = await provider.getProgress(jobId)
@@ -60,6 +75,7 @@ export async function GET(
         data: {
           status: progress.status,
           progress: progress.progress,
+          provider: provider.name,
         },
       })
 
@@ -84,8 +100,34 @@ export async function GET(
     } catch (error: any) {
       console.error(`Error in ${provider.name}Provider.getProgress:`, error)
       
+      // If Runware fails, fallback to mock for non-demo jobs
+      if (provider.name === "runware" && !isDemoJob(jobId)) {
+        console.warn("[progress] RunwareProvider failed, falling back to mock:", error.message)
+        try {
+          const { createMockProvider } = await import("@/lib/generation/providers/mock")
+          const mockProvider = createMockProvider()
+          const fallbackProgress = await mockProvider.getProgress(jobId)
+          
+          const statusMap: Record<string, string> = {
+            pending: "processing",
+            processing: "processing",
+            succeeded: "succeeded",
+            failed: "failed",
+          }
+          
+          return NextResponse.json({
+            jobId,
+            status: statusMap[fallbackProgress.status] || fallbackProgress.status,
+            progress: fallbackProgress.progress,
+            message: fallbackProgress.message || "Fallback to mock progress",
+          })
+        } catch (fallbackError) {
+          console.error("[progress] Mock fallback also failed:", fallbackError)
+        }
+      }
+      
       // 如果是 Mock Provider 且是 demo-001，特殊處理（向後兼容）
-      if (provider.name === "mock" && jobId === "demo-001") {
+      if (provider.name === "mock" && isDemoJob(jobId)) {
         return NextResponse.json({
           jobId,
           status: "succeeded",
@@ -95,7 +137,10 @@ export async function GET(
       }
 
       // 其他錯誤返回 500
-      return NextResponse.json({ error: "Failed to fetch progress" }, { status: 500 })
+      return NextResponse.json({ 
+        error: "Failed to fetch progress",
+        message: error.message || "Unknown error",
+      }, { status: 500 })
     }
 
   } catch (error) {

@@ -7,6 +7,7 @@ import { RunwareGenerateRequest } from "@/lib/generation/runware-client"
 import { validateRunwarePayload, RunwarePayload } from "@/lib/providers/runware.schema"
 import { ZodError } from "zod"
 import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
+import { isPreviewEnv, runwareMode } from "@/lib/featureFlags"
 
 /**
  * 主要流程：
@@ -160,12 +161,18 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // RUNWARE-NOTE: Check if template + style combination is supported by RunwareProvider
-    // Only "christmas" + "realistic" is supported, others fallback to mock
-    const isRunwareSupported = template === "christmas" && style === "realistic"
+    // Route B: Real Runware API integration with fallback to mock
+    // Priority: preview → mock, runware enabled + supported template → runware, else → mock
     
-    // 如果使用 Runware Provider 且 template/style 組合支援
-    if (provider.name === "runware" && isRunwareSupported) {
+    // Always use mock for preview environment (Route A/C/D)
+    const shouldUseMock = isPreviewEnv // Preview always uses mock for safety
+    
+    // Check if Runware is enabled and template/style is supported
+    const isRunwareSupported = template === "christmas" && style === "realistic"
+    const isRunwareEnabled = runwareMode === "real" && provider.name === "runware"
+    
+    // Try Runware first if enabled and supported, and not in preview/demo mode
+    if (!shouldUseMock && isRunwareEnabled && isRunwareSupported) {
       try {
         const fileUrls = await getFileUrls(files, user.id)
         // 將 userId 傳入 payload（provider 可能需要）
@@ -189,205 +196,55 @@ export async function POST(request: NextRequest) {
 
         return NextResponse.json({ ok: true, jobId, request_id: requestId })
       } catch (error: any) {
-        // RUNWARE-NOTE: If RunwareProvider throws (e.g., template not supported), fallback to mock
-        console.warn("[generate] RunwareProvider failed, falling back to mock:", error.message)
+        // RUNWARE-NOTE: If RunwareProvider fails, fallback to mock
+        console.error("[generate] RunwareProvider failed, falling back to mock:", {
+          error: error.message,
+          status: error.status,
+          name: error.name,
+        })
+        
+        // Log fallback event
+        await logAnalyticsEvent({
+          event_type: "gen_fail",
+          request_id: requestId,
+          user_id: user.id,
+          error: "RUNWARE_FALLBACK",
+          data: {
+            error_message: error.message,
+            error_status: error.status,
+            template,
+            style,
+            fallback_to: "mock",
+          },
+        })
+        
         // Fall through to mock provider below
       }
     }
 
-    // 如果使用 Mock Provider，或 Runware 不支援此 template/style 組合
-    // RUNWARE-NOTE: Mock provider handles all cases, including unsupported Runware combinations
-    if (provider.name === "mock" || !isRunwareSupported) {
-      const fileUrls = files.map(f => f.name || "")
-      const { jobId } = await provider.generate({ files: fileUrls, style, template })
-      
-      // 记录 gen_ok 事件（Mock 模式）
-      await logAnalyticsEvent({
-        event_type: "gen_ok",
-        request_id: requestId,
-        user_id: user.id,
-        data: {
-          job_id: jobId,
-          mode: "mock",
-          model_provider: "mock",
-          model_id: null,
-          template,
-          style,
-          fallback_reason: provider.name === "runware" && !isRunwareSupported ? "template_not_supported" : undefined,
-        },
-      })
-
-      return NextResponse.json({ ok: true, jobId, request_id: requestId })
-    }
-
-    // 如果走到這裡，表示 provider 不是 mock 也不是 runware（可能是 fal 或其他）
-    // 使用現有的 Provider Router（向後兼容）
-
-    // Validate inputs - 返回缺失字段列表
-    const missingFields: string[] = []
-    if (!files || files.length === 0) {
-      missingFields.push("files")
-    }
-    if (!style) {
-      missingFields.push("style")
-    }
-    if (!template) {
-      missingFields.push("template")
-    }
-
-    if (missingFields.length > 0) {
-      return NextResponse.json(
-        { 
-          ok: false, 
-          error: "Missing required fields", 
-          fields: missingFields,
-          request_id: requestId 
-        },
-        { status: 400 }
-      )
-    }
-
-    let jobId: string
-    let mode: "fal" | "runware" | "mock" | "degraded" = "fal"
-    let finalModelProvider: string = "fal"
-    let finalModelId: string | null = falModelId
-
-    try {
-      // 获取文件 URL（从 Supabase Storage）
-      const fileUrls = await getFileUrls(files, user.id)
-
-      // 如果配置了 FAL_API_KEY 或 RUNWARE_API_KEY，则使用 Provider Router
-      if (falApiKey || runwareApiKey) {
-        // 构建最小 payload（先只保留必需字段）
-        const providerRequest: ProviderGenerateRequest = buildRunwarePayload({
-          files: fileUrls,
-          style,
-          template,
-        })
-
-        const routerResponse = await routeGenerateRequest(
-          providerRequest,
-          {
-            request_id: requestId,
-            user_id: user.id,
-          }
-        )
-
-        jobId = routerResponse.jobId
-        mode = routerResponse.provider
-        finalModelProvider = routerResponse.provider
-        finalModelId = routerResponse.provider === "fal" ? falModelId : null
-      } else {
-        // 没有 API key：如果是 Preview 且 useMock=true，上面已返回；这里作为额外保护
-        throw new Error("FAL_API_KEY or RUNWARE_API_KEY missing, cannot call provider")
-      }
-    } catch (error: any) {
-      console.error("Provider router failed:", error)
-      
-      // 检查是否是 Provider 4xx/5xx 错误（来自 Runware 或 FAL）
-      if (error.status && error.status >= 400 && error.status < 600) {
-        // Provider 返回了 4xx/5xx 错误
-        // 从错误消息中推断 provider（如果包含 "Runware" 或 "FAL"）
-        let detectedProvider: "runware" | "fal" = "fal"
-        if (error.message?.includes("Runware") || error.message?.toLowerCase().includes("runware")) {
-          detectedProvider = "runware"
-        } else if (error.message?.includes("FAL") || error.message?.toLowerCase().includes("fal")) {
-          detectedProvider = "fal"
-        }
-        
-        // 生成路径严格要求 2xx（健康检查允许 400，但生成不允许）
-        const statusCode = error.status >= 500 ? 502 : 500
-        const errorMessage = error.responseBody?.error || error.responseBody?.message || error.message || "Provider API error"
-        const responseBodyText = error.responseBodyText || (typeof error.responseBody === "string" ? error.responseBody.substring(0, 300) : JSON.stringify(error.responseBody).substring(0, 300))
-        const xRequestId = error.xRequestId || null
-        
-        // 构建 hint（包含 response body 片段和 x-request-id）
-        const hint = xRequestId 
-          ? `x-request-id: ${xRequestId}; response: ${responseBodyText}`
-          : `response: ${responseBodyText}`
-        
-        // 记录错误事件
-        await logAnalyticsEvent({
-          event_type: "gen_fail",
-          request_id: requestId,
-          user_id: user.id,
-          error: `PROVIDER_${error.status}`,
-          data: {
-            provider: detectedProvider,
-            status: error.status,
-            error_message: errorMessage,
-          },
-        })
-
-        return NextResponse.json(
-          {
-            ok: false,
-            provider: detectedProvider,
-            status: error.status,
-            error: errorMessage,
-            hint,
-            request_id: requestId,
-          },
-          { status: statusCode }
-        )
-      }
-      
-      // 其他错误：降级到 Mock 模式（仅在非生产环境）
-      if (!isProduction) {
-        console.warn("Provider router failed, falling back to mock if allowed:", error)
-        jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-        mode = "degraded"
-        finalModelProvider = "degraded"
-        finalModelId = null
-      } else {
-        // 生产环境不允许降级
-        await logAnalyticsEvent({
-          event_type: "gen_fail",
-          request_id: requestId,
-          user_id: user.id,
-          error: "PROVIDER_ERROR",
-          data: {
-            error_message: error.message || "Unknown provider error",
-          },
-        })
-
-        return NextResponse.json(
-          {
-            ok: false,
-            error: "Generation service unavailable",
-            request_id: requestId,
-          },
-          { status: 503 }
-        )
-      }
-    }
-
-    // Store job in database
-    const supabaseClient = await createClient()
-    const { error: dbError } = await supabaseClient.from("jobs").insert({
-      id: jobId,
-      user_id: user.id,
-      style,
-      template,
-      status: "pending",
-      created_at: new Date().toISOString(),
-    })
-
-    if (dbError) {
-      console.error("Error storing job:", dbError)
-      // Continue anyway, job might still be processed
-    }
-
-    // 记录 gen_ok 事件
+    // Use Mock Provider for all other cases:
+    // - Preview environment (Route A/C/D)
+    // - Runware not enabled
+    // - Template/style not supported
+    // - Runware failed (fallback)
+    const fileUrls = files.map(f => f.name || "")
+    const mockProvider = getGenerationProvider() // Get mock provider explicitly
+    const { jobId } = await mockProvider.generate({ files: fileUrls, style, template })
+    
+    // 记录 gen_ok 事件（Mock 模式）
     await logAnalyticsEvent({
       event_type: "gen_ok",
       request_id: requestId,
       user_id: user.id,
       data: {
         job_id: jobId,
-        mode,
-        model_provider: finalModelProvider,
-        model_id: finalModelId,
+        mode: "mock",
+        model_provider: "mock",
+        model_id: null,
+        template,
+        style,
+        fallback_reason: isRunwareEnabled && !isRunwareSupported ? "template_not_supported" : 
+                         isRunwareEnabled && isRunwareSupported ? "runware_failed" : undefined,
       },
     })
 
@@ -397,7 +254,7 @@ export async function POST(request: NextRequest) {
     
     // 记录错误事件
     await logAnalyticsEvent({
-      event_type: "gen_start",
+      event_type: "gen_fail",
       request_id: requestId,
       user_id: user?.id || null,
       error: "internal_error",
@@ -408,92 +265,6 @@ export async function POST(request: NextRequest) {
       { error: "Failed to process generation request", request_id: requestId },
       { status: 500 }
     )
-  }
-}
-
-/**
- * 构建 Runware 最小 payload
- * 先只保留最必需字段，其他字段待通过后逐步加回
- * 
- * @throws {ZodError} 如果 payload 验证失败
- */
-function buildRunwarePayload(input: {
-  files: string[]
-  style: string
-  template: string
-}): ProviderGenerateRequest {
-  // 将 style 和 template 组合成 prompt
-  const prompt = `${input.style} ${input.template}`.trim()
-  
-  // 使用第一个文件 URL 作为 image_url（如果有且是有效 URL）
-  let imageUrl: string | undefined = undefined
-  if (input.files.length > 0) {
-    const firstFile = input.files[0]
-    // 验证是否为有效 URL（排除占位符 URL）
-    try {
-      const url = new URL(firstFile)
-      // 排除占位符域名
-      if (!url.hostname.includes("example.com") && !url.hostname.includes("localhost")) {
-        imageUrl = firstFile
-      }
-    } catch {
-      // 不是有效 URL，忽略
-    }
-  }
-
-  // 构建符合 Runware schema 的 payload
-  const runwarePayload: RunwarePayload = {
-    taskType: "imageInference", // Runware API 必需字段
-    prompt,
-    model: "default",
-    ...(imageUrl && { image_url: imageUrl }),
-  }
-
-  try {
-    // 使用 schema 验证 payload
-    const validatedPayload = validateRunwarePayload(runwarePayload)
-    
-    console.log("[generate] buildRunwarePayload: validated", {
-      prompt: validatedPayload.prompt.substring(0, 50) + "...",
-      model: validatedPayload.model,
-      hasImageUrl: !!validatedPayload.image_url,
-      payloadKeys: Object.keys(validatedPayload),
-    })
-
-    // 转换回 ProviderGenerateRequest 格式（保持兼容性）
-    const payload: ProviderGenerateRequest = {
-      files: input.files,
-      style: input.style,
-      template: input.template,
-    }
-
-    return payload
-  } catch (error) {
-    if (error instanceof ZodError) {
-      // 打印哪个字段不合格
-      const fieldErrors = error.errors.map((err) => ({
-        field: err.path.join("."),
-        message: err.message,
-        code: err.code,
-      }))
-      
-      console.error("[generate] buildRunwarePayload: validation failed", {
-        errors: fieldErrors,
-        input: {
-          filesCount: input.files.length,
-          style: input.style,
-          template: input.template,
-        },
-      })
-      
-      // 抛出包含详细错误信息的错误
-      const errorMessage = fieldErrors
-        .map((e) => `Field '${e.field}': ${e.message}`)
-        .join("; ")
-      
-      throw new Error(`Runware payload validation failed: ${errorMessage}`)
-    }
-    throw error
   }
 }
 
@@ -547,3 +318,4 @@ async function logAnalyticsEvent(event: {
     // 不抛出错误，避免影响主流程
   }
 }
+
