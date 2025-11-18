@@ -22,13 +22,12 @@ export default async function LoginPage() {
     redirect("/dashboard")
   }
 
+  // Pass ALLOW_TEST_LOGIN flag to client component
+  const allowTestLogin = process.env.ALLOW_TEST_LOGIN === "true"
+
   // 未登入：顯示登入表單
   return (
     <>
-      {/* DEBUG BANNER - 永遠顯示，用於確認部署 */}
-      <div className="w-full bg-black text-yellow-300 text-center py-4 font-mono text-xl font-bold">
-        *** DEBUG BUILD - LOGIN PAGE ***
-      </div>
     <div className="min-h-screen flex flex-col">
       <Navigation />
 
@@ -36,7 +35,7 @@ export default async function LoginPage() {
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-accent/5 to-primary/5 gradient-animate" />
 
         <div className="container relative z-10 mx-auto px-4 sm:px-6 lg:px-8 max-w-md">
-          <LoginClient />
+          <LoginClient allowTestLogin={allowTestLogin} />
 
           <div className="mt-8 pt-6 border-t border-border text-center">
             <Link

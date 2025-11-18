@@ -5,9 +5,21 @@ import { updateMockJobState, createMockJob } from "@/lib/generation/mock-state-m
 import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
 import { isDemoJob } from "@/lib/featureFlags"
 
+// 總開關：當 RUNWARE_ENABLED=false 時，完全禁用 Runware API 調用
+const RUNWARE_ENABLED =
+  process.env.RUNWARE_ENABLED !== "false" &&
+  process.env.RUNWARE_ENABLED !== "0"
+
 // Mock Job 状态存储（内存，生产环境应使用数据库）
 const mockJobStore = new Map<string, ReturnType<typeof createMockJob>>()
 
+/**
+ * Progress API Route
+ * 
+ * Mock Job 規則：
+ * - jobId 以 "job_" 開頭 → Mock job，直接返回成功狀態，不調用 Runware API，不查詢 Supabase
+ * - 其他 jobId → 可能是 Runware job，走正常的 provider 流程
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> | { id: string } }
@@ -19,6 +31,19 @@ export async function GET(
 
     if (!jobId) {
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 })
+    }
+
+    // Mock Job 判斷：jobId 以 "job_" 開頭 → 直接返回成功，不調用 Runware，不查詢 DB
+    if (jobId.startsWith("job_")) {
+      console.log("[api/progress] Mock job detected (job_ prefix), returning success without Runware/DB calls", { jobId })
+      return NextResponse.json({
+        jobId,
+        status: "succeeded",
+        progress: 100,
+        message: "Generation complete!",
+        provider: "mock",
+        isMock: true,
+      })
     }
 
     // Route A: demo-001 固定返回成功（全 mock demo flow）
@@ -43,30 +68,91 @@ export async function GET(
       })
     }
 
+    // 總開關檢查：如果 RUNWARE_ENABLED=false，直接返回假狀態，不再查詢 Runware API
+    if (!RUNWARE_ENABLED) {
+      console.log("[api/progress] RUNWARE_DISABLED, returning fake status for job", jobId)
+      return NextResponse.json({
+        jobId,
+        status: "succeeded",
+        progress: 100,
+        message: "Generation complete! (Runware disabled)",
+      })
+    }
+
     // Route B: Use provider system (Mock or Runware)
-    // Check if job is from Runware (non-demo job) and runwareMode is enabled
-    const { runwareMode, isPreviewEnv } = await import("@/lib/featureFlags")
-    const isRunwareJob = !isDemoJob(jobId) && runwareMode === "real"
+    // 修復：判斷 job 是來自 Runware 還是 Mock
+    // - 如果 DB 中有 job 記錄且 status 不是 pending/processing，可能是 Runware job
+    // - 否則，使用 MockProvider（因為 Mock job 不會在 DB 中）
+    const serviceClient = createServiceClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!,
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    )
     
-    // Determine which provider to use
-    // - demo-001: always use mock (already handled above)
-    // - Runware job: use RunwareProvider if enabled
-    // - Others: use MockProvider
+    // 先檢查 DB 中是否有這個 job
+    const { data: dbJob } = await serviceClient
+      .from("jobs")
+      .select("id, status")
+      .eq("id", jobId)
+      .single()
+    
+    // 判斷使用哪個 provider
+    // - 如果 DB 中有 job 記錄，可能是 Runware job（Runware 會寫入 DB）
+    // - 如果 DB 中沒有，且不是 demo-001，使用 MockProvider
     let provider = getGenerationProvider()
+    const isRunwareJob = dbJob !== null && dbJob !== undefined
     
-    // If it's a Runware job but provider is mock, try to get RunwareProvider
-    if (isRunwareJob && provider.name === "mock") {
+    if (isRunwareJob && RUNWARE_ENABLED) {
+      // DB 中有 job，嘗試使用 RunwareProvider
       try {
         const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
         provider = createRunwareProvider()
       } catch (error) {
-        // If RunwareProvider creation fails (e.g., missing API key), fallback to mock
+        // 如果 RunwareProvider 創建失敗，fallback 到 mock
         console.warn("[progress] Failed to create RunwareProvider, using mock:", error)
       }
+    } else {
+      // DB 中沒有 job，或 Runware 未啟用，使用 MockProvider
+      const { createMockProvider } = await import("@/lib/generation/providers/mock")
+      provider = createMockProvider()
     }
     
     try {
       const progress = await provider.getProgress(jobId)
+      
+      // 修復：Mock provider 永遠不應該返回 failed 狀態
+      // 如果 provider 是 mock 且返回 failed，強制改為 succeeded
+      if (provider.name === "mock" && progress.status === "failed") {
+        console.warn(`[progress] Mock provider returned failed for job ${jobId}, forcing succeeded`)
+        return NextResponse.json({
+          jobId,
+          status: "succeeded",
+          progress: 100,
+          message: "Generation complete!",
+        })
+      }
+      
+      // TASK 2: If status is failed, return it immediately without retrying
+      if (progress.status === "failed") {
+        const statusMap: Record<string, string> = {
+          pending: "processing",
+          processing: "processing",
+          succeeded: "succeeded",
+          failed: "failed",
+        }
+        
+        return NextResponse.json({
+          jobId,
+          status: statusMap[progress.status] || "failed",
+          progress: progress.progress || 100,
+          message: progress.message || progress.errorMessage || "Generation failed",
+        })
+      }
       
       // 記錄 progress_tick 事件
       await logAnalyticsEvent({
@@ -100,30 +186,16 @@ export async function GET(
     } catch (error: any) {
       console.error(`Error in ${provider.name}Provider.getProgress:`, error)
       
-      // If Runware fails, fallback to mock for non-demo jobs
+      // TASK 2: For Runware errors, return failed status instead of throwing
       if (provider.name === "runware" && !isDemoJob(jobId)) {
-        console.warn("[progress] RunwareProvider failed, falling back to mock:", error.message)
-        try {
-          const { createMockProvider } = await import("@/lib/generation/providers/mock")
-          const mockProvider = createMockProvider()
-          const fallbackProgress = await mockProvider.getProgress(jobId)
-          
-          const statusMap: Record<string, string> = {
-            pending: "processing",
-            processing: "processing",
-            succeeded: "succeeded",
-            failed: "failed",
-          }
-          
-          return NextResponse.json({
-            jobId,
-            status: statusMap[fallbackProgress.status] || fallbackProgress.status,
-            progress: fallbackProgress.progress,
-            message: fallbackProgress.message || "Fallback to mock progress",
-          })
-        } catch (fallbackError) {
-          console.error("[progress] Mock fallback also failed:", fallbackError)
-        }
+        console.warn("[progress] RunwareProvider failed, returning failed status:", error.message)
+        // Log error but return failed status to stop polling
+        return NextResponse.json({
+          jobId,
+          status: "failed",
+          progress: 100,
+          message: "Generation failed",
+        })
       }
       
       // 如果是 Mock Provider 且是 demo-001，特殊處理（向後兼容）

@@ -23,14 +23,24 @@ export class MockProvider implements GenerationProvider {
   name: "mock" = "mock"
 
   async generate(input: GenerateRequestPayload): Promise<GenerateResult> {
-    // 生成 Mock Job ID（與現有實作一致）
-    const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-    
-    // 創建 Mock Job 狀態（與現有實作一致）
-    const mockJob = createMockJob(jobId)
-    mockJobStore.set(jobId, mockJob)
-    
-    return { ok: true, jobId }
+    // Mock provider.generate() should never fail in normal cases
+    // It always returns a valid jobId regardless of input
+    try {
+      // 生成 Mock Job ID（與現有實作一致）
+      const jobId = `job_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+      
+      // 創建 Mock Job 狀態（與現有實作一致）
+      const mockJob = createMockJob(jobId)
+      mockJobStore.set(jobId, mockJob)
+      
+      return { ok: true, jobId }
+    } catch (error: any) {
+      // This should never happen, but handle gracefully
+      console.error("[mock-provider] generate() unexpected error:", error)
+      // Still return a valid jobId even if state machine fails
+      const fallbackJobId = `job_${Date.now()}_fallback`
+      return { ok: true, jobId: fallbackJobId }
+    }
   }
 
   async getProgress(jobId: string): Promise<ProgressResult> {
@@ -58,6 +68,16 @@ export class MockProvider implements GenerationProvider {
       mockJobStore.set(jobId, job)
     }
 
+    // 修復：Mock provider 永遠不應該返回 failed 狀態
+    // 如果狀態機返回 failed，強制改為 succeeded
+    if (job.status === "failed") {
+      console.warn(`[mock-provider] Job ${jobId} status is failed, forcing succeeded`)
+      job.status = "succeeded"
+      job.progress = 100
+      job.message = "Generation complete!"
+      mockJobStore.set(jobId, job)
+    }
+
     // 正規化狀態（與現有 API 回應格式一致）
     // API 狀態: queued/running/succeeded/failed
     // 轉換為 ProgressResult 狀態: pending/processing/succeeded/failed
@@ -65,18 +85,22 @@ export class MockProvider implements GenerationProvider {
       queued: "pending",
       running: "processing",
       succeeded: "succeeded",
-      failed: "failed",
+      failed: "succeeded", // 修復：failed → succeeded（Mock 永遠成功）
     }
     
     const apiStatus = job.status === "queued" ? "queued" : job.status === "running" ? "running" : job.status
     const progressStatus = statusMap[apiStatus] || "pending"
 
+    // 修復：確保最終狀態不是 failed
+    const finalStatus = progressStatus === "failed" ? "succeeded" : progressStatus
+    const finalProgress = finalStatus === "succeeded" ? 100 : job.progress
+
     return {
       ok: true,
       jobId,
-      status: progressStatus,
-      progress: job.progress,
-      message: job.message,
+      status: finalStatus,
+      progress: finalProgress,
+      message: finalStatus === "succeeded" ? "Generation complete!" : job.message,
     }
   }
 

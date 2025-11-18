@@ -7,6 +7,13 @@ import { calculateQualityScores, shouldIssueVoucher, generateVoucher } from "@/l
 import { getGenerationProvider, getProviderType } from "@/lib/generation/getProvider"
 import { isDemoJob } from "@/lib/featureFlags"
 
+/**
+ * Results API Route
+ * 
+ * Mock Job 規則：
+ * - jobId 以 "job_" 開頭 → Mock job，直接返回固定 mock 圖片，不查詢 Supabase，不調用 Runware API
+ * - 其他 jobId → 可能是 Runware job，走正常的 provider 流程（查 Supabase，可能需要同步 Runware）
+ */
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> | { id: string } }
@@ -18,6 +25,28 @@ export async function GET(
 
     if (!jobId) {
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 })
+    }
+
+    // Mock Job 判斷：jobId 以 "job_" 開頭 → 直接返回固定 mock 圖片，不查詢 Supabase，不調用 Runware
+    if (jobId.startsWith("job_")) {
+      console.log("[api/results] Mock job detected (job_ prefix), returning mock images without Supabase/Runware calls", { jobId })
+      const requestUrl = new URL(request.url)
+      const paidParam = requestUrl.searchParams.get("paid")
+      const isPaid = paidParam === "1" || paidParam === "true"
+      
+      return NextResponse.json({
+        ok: true,
+        jobId,
+        images: [
+          { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
+          { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
+          { id: 3, url: "/assets/mock/family3.jpg", thumbnail: "/assets/mock/family3.jpg" },
+        ],
+        paymentStatus: isPaid ? "paid" : "unpaid",
+        createdAt: new Date().toISOString(),
+        provider: "mock",
+        isMock: true,
+      })
     }
 
     // Route A: demo-001 固定返回 mock 图片，跳过登录验证（全 mock demo flow）
@@ -40,6 +69,9 @@ export async function GET(
     }
 
     // Route B: Use provider system (Mock or Runware)
+    // 注意：Mock job（job_ 開頭）已在上面處理，這裡不會進入
+    // 這裡處理的是真正的 Runware job（非 job_ 開頭，且不是 demo-001）
+    
     // Check if job is from Runware (non-demo job) and runwareMode is enabled
     const { runwareMode, isPreviewEnv } = await import("@/lib/featureFlags")
     const isRunwareJob = !isDemoJob(jobId) && runwareMode === "real"
@@ -47,6 +79,7 @@ export async function GET(
     const useMock = providerType === "mock" || isPreviewEnv
 
     // If it's a Runware job, try to use RunwareProvider
+    // 只有真正的 Runware job 才會走到這裡（查 Supabase，可能需要同步 Runware）
     if (isRunwareJob && !useMock) {
       try {
         const { createRunwareProvider } = await import("@/lib/generation/providers/runware")

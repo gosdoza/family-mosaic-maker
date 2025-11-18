@@ -16,7 +16,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useToast } from "@/hooks/use-toast"
 import { ErrorState } from "@/components/error-state"
 import { trackMetric } from "@/lib/metrics"
-import { isDemoMode, isPreviewEnv as getIsPreviewEnv } from "@/lib/featureFlags"
+import { isDemoMode, isPreviewEnv as getIsPreviewEnv, isDemoJob, runwareMode, isForceRealGenerate } from "@/lib/featureFlags"
 
 const STYLE_PRESETS: StylePreset[] = [
   { id: "realistic", name: "Realistic", emoji: "📸", description: "Natural, lifelike family portraits" },
@@ -41,24 +41,30 @@ function GenerateContent() {
   const [uploadedFiles, setUploadedFiles] = useState<File[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [useRealAI, setUseRealAI] = useState(false) // TASK 1: Per-request flag for real AI
   const { toast } = useToast()
   // NOTE: behavior preserved, just using centralized feature flags
   const isMock = isDemoMode
   const e2e = searchParams.get("e2e") === "1"
   
-  // Unified preview environment detection
-  // NOTE: behavior preserved, just using centralized feature flags
-  const isPreviewEnv = (() => {
-    if (getIsPreviewEnv) return true
+  // Use centralized isPreviewEnv from featureFlags (don't override with hostname check)
+  // The hostname-based check was causing localhost to be treated as preview
+  const isPreviewEnv = getIsPreviewEnv
 
-    if (typeof window !== "undefined") {
-      const host = window.location.hostname
-      const prod = "family-mosaic-maker.vercel.app"
-      return host !== prod // everything except prod = preview
-    }
+  // 前端旗標：讀取 NEXT_PUBLIC_RUNWARE_ENABLED 判斷是否啟用 Runware
+  // TASK 1: Explicitly check for "true" to ensure checkbox shows correctly
+  const runwareEnabled =
+    typeof process.env.NEXT_PUBLIC_RUNWARE_ENABLED === "string"
+      ? process.env.NEXT_PUBLIC_RUNWARE_ENABLED === "true"
+      : false
 
-    return false
-  })()
+  // TASK 1: Debug log for runwareEnabled
+  useEffect(() => {
+    console.log("[generate][debug] runwareEnabled =", runwareEnabled, {
+      envValue: process.env.NEXT_PUBLIC_RUNWARE_ENABLED,
+      envType: typeof process.env.NEXT_PUBLIC_RUNWARE_ENABLED,
+    })
+  }, [runwareEnabled])
 
   const handleFilesChange = (files: File[]) => {
     setUploadedFiles(files)
@@ -117,6 +123,25 @@ function GenerateContent() {
     }
   }, [isMock, e2e, selectedStyle, selectedTemplate, currentStep])
 
+  // Debug: Log feature flags on component mount and when they change
+  useEffect(() => {
+    console.log("[generate][flags]", {
+      isDemoMode,
+      isPreviewEnv,
+      runwareMode,
+      isForceRealGenerate,
+      runwareEnabled, // TASK 1: Include runwareEnabled in flags log
+      nodeEnv: process.env.NODE_ENV,
+      nextPublicUseMock: process.env.NEXT_PUBLIC_USE_MOCK,
+      nextPublicDemoMode: process.env.NEXT_PUBLIC_DEMO_MODE,
+      nextPublicRunwareMode: process.env.NEXT_PUBLIC_RUNWARE_MODE,
+      nextPublicRunwareEnabled: process.env.NEXT_PUBLIC_RUNWARE_ENABLED, // TASK 1: Include in flags log
+      nextPublicForceRealGenerate: process.env.NEXT_PUBLIC_FORCE_REAL_GENERATE,
+      vercelEnv: process.env.VERCEL_ENV,
+      nextPublicVercelEnv: process.env.NEXT_PUBLIC_VERCEL_ENV,
+    })
+  }, [isDemoMode, isPreviewEnv, runwareMode, isForceRealGenerate, runwareEnabled])
+
   // Debug: Log state changes for troubleshooting
   useEffect(() => {
     console.log("[generate][debug-state]", {
@@ -142,31 +167,180 @@ function GenerateContent() {
     isGenerating,
   ])
 
-  // TEMPORARY:
-  // For Route A (UX demo), we always use a mock job and skip the real /api/generate call.
-  // TODO: Reintroduce real Runware generate flow for non-preview once Route A is fully validated.
+  /**
+   * Handle Generate button click
+   * 
+   * Strategy:
+   * - Preview/Demo mode: Direct navigation to demo-001 (Route A)
+   * - Production/Real mode: Call /api/generate and navigate based on jobId
+   * - Force Real mode: Override demo/preview flags for local development
+   */
   const handleGenerate = async () => {
-    // TEMP: force mock flow globally
-    const payload = {
-      currentStep,
-      uploadedCount: uploadedFiles.length,
-      selectedStyle,
-      selectedTemplate,
-      // keep these for debugging, but they no longer affect control flow:
-      isMock,
-      isPreviewEnv,
-      e2e,
+    // Set loading state
+    setIsGenerating(true)
+    setError(null)
+
+    try {
+      // Determine if we should use demo flow or real flow
+      const demoCandidate = isDemoMode || isPreviewEnv
+      
+      // Force real generate if:
+      // 1. NEXT_PUBLIC_FORCE_REAL_GENERATE=true is set, OR
+      // 2. We're in local dev (NODE_ENV !== "production") AND runwareMode === "real"
+      const shouldForceReal =
+        isForceRealGenerate ||
+        (process.env.NODE_ENV !== "production" && runwareMode === "real")
+      
+      const shouldUseDemoFlow = demoCandidate && !shouldForceReal
+
+      // Route A: Preview/Demo mode - direct navigation to demo-001
+      if (shouldUseDemoFlow) {
+        console.log("[generate][route-a] Demo flow", {
+          isDemoMode,
+          isPreviewEnv,
+          shouldForceReal,
+          runwareMode,
+        })
+        const mockJobId = "demo-001"
+        // Reset loading state before navigation (navigation will unmount component)
+        setIsGenerating(false)
+        router.push(`/progress/${mockJobId}`)
+        return
+      }
+
+      // Route B: Production/Real mode - call /api/generate
+      console.log("[generate][route-b] Real flow: calling /api/generate", {
+        uploadedCount: uploadedFiles.length,
+        style: selectedStyle,
+        template: selectedTemplate,
+        runwareMode,
+        isForceRealGenerate,
+        shouldForceReal,
+        demoCandidate,
+      })
+
+      // Validate inputs
+      if (uploadedFiles.length === 0) {
+        throw new Error("Please upload at least one portrait")
+      }
+      if (!selectedStyle) {
+        throw new Error("Please select a style")
+      }
+      if (!selectedTemplate) {
+        throw new Error("Please select a template")
+      }
+
+      // Prepare FormData for /api/generate
+      const formData = new FormData()
+      uploadedFiles.forEach((file) => {
+        formData.append("files", file)
+      })
+      formData.append("style", selectedStyle)
+      formData.append("template", selectedTemplate)
+      // TASK 1: Include useReal flag in request
+      formData.append("useReal", useRealAI ? "true" : "false")
+
+      // Call /api/generate
+      const response = await fetch("/api/generate", {
+        method: "POST",
+        body: formData,
+      })
+
+      const data = await response.json()
+
+      // TASK 3: Log raw response for debugging
+      console.log("[generate][route-b] raw response", {
+        responseOk: response.ok,
+        dataOk: data.ok,
+        dataJobId: data.jobId,
+        dataProvider: data.provider,
+        dataIsFallback: data.isFallback,
+        fullData: data,
+      })
+
+      // TASK 3: Handle error response - only fail if:
+      // - HTTP response is not ok (4xx/5xx), OR
+      // - data.ok is explicitly false, OR
+      // - no jobId is present
+      // If data.ok === true and jobId exists, treat as success regardless of provider
+      if (!response.ok) {
+        // HTTP error (4xx/5xx)
+        const errorMessage = data.error || data.message || `HTTP ${response.status}: Failed to start generation`
+        console.error("[generate][route-b] HTTP error:", response.status, errorMessage)
+        throw new Error(errorMessage)
+      }
+      
+      if (data.ok === false || !data.jobId) {
+        // API returned error or missing jobId
+        const errorMessage = data.error || data.message || "Failed to start generation"
+        console.error("[generate][route-b] API error:", errorMessage)
+        
+        // In dev, log debug info if available
+        const isDev = process.env.NODE_ENV !== "production"
+        if (isDev && data.debug) {
+          console.error("[generate][route-b] API debug:", data.debug)
+        }
+        
+        // Create error with debug info attached
+        const error = new Error(errorMessage) as any
+        if (data.debug) {
+          error.debug = data.debug
+        }
+        throw error
+      }
+
+      // TASK 3: Success - data.ok === true and jobId exists (mock or runware)
+      const jobId = data.jobId
+      console.log("[generate][route-b] Success:", { 
+        jobId, 
+        request_id: data.request_id,
+        provider: data.provider || "unknown",
+        isFallback: data.isFallback || false,
+        ok: data.ok,
+      })
+
+      // Clear any previous error state
+      setError(null)
+      
+      // If jobId is demo-001, navigate to results (Route A compatibility)
+      if (isDemoJob(jobId)) {
+        router.push(`/results/${jobId}`)
+      } else {
+        // Real job: navigate to progress page
+        router.push(`/progress/${jobId}`)
+      }
+    } catch (err) {
+      // Handle errors
+      const errorMessage = err instanceof Error ? err.message : "Failed to generate family photo"
+      console.error("[generate][error]", {
+        message: errorMessage,
+        cause: err,
+        stack: err instanceof Error ? err.stack : undefined,
+      })
+      
+      // If we have debug info from API response, log it
+      if (err instanceof Error && (err as any).debug) {
+        console.error("[generate][route-b] API debug:", (err as any).debug)
+      }
+      
+      setError(errorMessage)
+      
+      // Show toast notification
+      // In dev, show more detail if available
+      const isDev = process.env.NODE_ENV !== "production"
+      const debugInfo = (err as any).debug
+      const toastDescription = isDev && debugInfo
+        ? `${errorMessage}\n\nDebug: ${debugInfo.name || ""} ${debugInfo.status || ""} ${debugInfo.message || ""}`
+        : errorMessage
+      
+      toast({
+        title: "Generation Failed",
+        description: toastDescription,
+        variant: "destructive",
+      })
+      
+      setIsGenerating(false)
     }
-
-    console.log("[generate][click:mock-only]", payload)
-
-    // 🚫 IMPORTANT:
-    // - DO NOT call fetch("/api/generate", ...) here.
-    // - DO NOT construct FormData for Runware here.
-    // - This handler should have exactly one side-effect: navigation.
-
-    const mockJobId = "demo-001"
-    router.push(`/progress/${mockJobId}`)
   }
 
   const handleRetry = () => {
@@ -182,11 +356,24 @@ function GenerateContent() {
 
       <main className="flex-1 pt-24 pb-16">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8 max-w-5xl">
-          {/* Mock 模式提示 */}
-          {isMock && (
-            <div className="mb-4 rounded-lg border border-yellow-200 bg-yellow-50 p-3 text-sm text-yellow-800">
-              <span className="font-medium">⚠️ 目前為 Mock 生成（未接入供應商）</span>
-              <span className="ml-2 text-yellow-700">功能僅供內部測試</span>
+          {/* Runware 狀態提示 */}
+          {!runwareEnabled && (
+            <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 dark:border-blue-800 dark:bg-blue-950 p-4 text-sm">
+              <div className="flex items-start gap-3">
+                <div className="flex-shrink-0 mt-0.5">
+                  <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="flex-1 space-y-1">
+                  <p className="font-medium text-blue-900 dark:text-blue-100">
+                    目前為本機開發模式
+                  </p>
+                  <p className="text-blue-800 dark:text-blue-200">
+                    使用的是模擬圖片生成，不會消耗 Runware 點數。正式上線時才會啟用真實 AI 生成。
+                  </p>
+                </div>
+              </div>
             </div>
           )}
           <div className="text-center space-y-4 mb-12">
@@ -262,9 +449,11 @@ function GenerateContent() {
                     *** DEBUG BUILD – GENERATE PAGE ***
                   </div>
                   <Sparkles className="w-16 h-16 text-primary mx-auto" />
-                  <h3 className="text-2xl font-semibold">🔥 DEBUG GENERATE PAGE 🔥</h3>
+                  <h3 className="text-2xl font-semibold">Ready to Generate</h3>
                   <p className="text-muted-foreground max-w-md mx-auto">
-                    Your beautiful family photo will be ready in about 60 seconds
+                    {runwareEnabled
+                      ? "Your beautiful family photo will be generated using AI (may consume credits)"
+                      : "Your beautiful family photo will be ready in about 60 seconds (demo mode)"}
                   </p>
                   <div className="flex flex-col gap-3 text-sm text-muted-foreground pt-4">
                     <div className="flex items-center justify-center gap-2">
@@ -280,6 +469,23 @@ function GenerateContent() {
                       <span>{TEMPLATE_COLLECTIONS.find((t) => t.id === selectedTemplate)?.name} template</span>
                     </div>
                   </div>
+                  
+                  {/* TASK 1: Real AI Toggle Checkbox (only visible when runwareEnabled) */}
+                  {runwareEnabled && (
+                    <div className="mt-6 pt-6 border-t border-border">
+                      <label className="flex items-center gap-3 cursor-pointer group">
+                        <input
+                          type="checkbox"
+                          checked={useRealAI}
+                          onChange={(e) => setUseRealAI(e.target.checked)}
+                          className="w-4 h-4 rounded border-gray-300 text-primary focus:ring-primary focus:ring-2"
+                        />
+                        <span className="text-sm text-foreground group-hover:text-primary transition-colors">
+                          使用真實 AI 生成（會消耗 Runware 點數）
+                        </span>
+                      </label>
+                    </div>
+                  )}
                 </Card>
               )}
 
@@ -325,12 +531,12 @@ function GenerateContent() {
                   {isGenerating ? (
                     <>
                       <Loader2 className="w-5 h-5 mr-2 animate-spin" />
-                      Generating...
+                      {runwareEnabled ? "Generating with AI..." : "Generating (Demo)..."}
                     </>
                   ) : (
                     <>
                       <Sparkles className="w-5 h-5 mr-2" />
-                      Generate Family Photo
+                      {runwareEnabled ? "Generate Family Photo (AI)" : "Generate Family Photo (Demo)"}
                     </>
                   )}
                 </Button>
@@ -356,7 +562,10 @@ function GenerateContent() {
                             isGenerating,
                             canProceed: canProceed(),
                             canGenerate: typeof canGenerate === "function" ? canGenerate() : "(not in scope)",
-                            generateEndpoint: isPreviewEnv ? "MOCK (direct demo-001)" : "/api/generate",
+                            generateEndpoint: (isDemoMode || isPreviewEnv) && !isForceRealGenerate && !(process.env.NODE_ENV !== "production" && runwareMode === "real") ? "MOCK (direct demo-001)" : "/api/generate",
+                            runwareMode,
+                            isForceRealGenerate,
+                            shouldForceReal: isForceRealGenerate || (process.env.NODE_ENV !== "production" && runwareMode === "real"),
                           },
                           null,
                           2

@@ -5,7 +5,7 @@ import { isPreviewEnv, isDemoMode, isDemoJob } from "@/lib/featureFlags"
 // Protected routes that require authentication
 // 注意：這些是頁面路由（page routes），不是 API 路由
 // API 路由（/api/*）由各自的 route handler 內部處理認證
-const PROTECTED_ROUTES = ["/orders", "/results", "/settings"]
+const PROTECTED_ROUTES = ["/orders", "/results", "/settings", "/generate", "/dashboard"]
 
 // Public API routes that should never require authentication
 // 這些路由應該永遠是公開的，用於健康檢查等用途
@@ -64,14 +64,17 @@ export async function middleware(request: NextRequest) {
   const isDashboardDemo = pathname === "/dashboard"
 
   // TEMP (Route D demo): In preview demo mode, allow /dashboard without auth
-  // NOTE: This check happens before isProtectedRoute because /dashboard is not in PROTECTED_ROUTES
-  // but we still want to handle it explicitly for demo mode
+  // NOTE: This check happens before isProtectedRoute check
   if (isPreviewEnv && isDemoMode && isDashboardDemo) {
     const res = NextResponse.next()
     return addSecurityHeaders(res, request)
   }
 
   if (isProtectedRoute) {
+    // Handle /generate and /dashboard separately (not in preview demo exceptions)
+    const isGenerate = pathname === "/generate"
+    const isDashboard = pathname === "/dashboard"
+    
     // Preview demo 例外：在 preview 環境，允許 /orders 和 /results/demo-001 免登入訪問
     // NOTE: behavior preserved, just using centralized feature flags
     // TEMP (Route D mock): Preview demo exceptions
@@ -81,39 +84,87 @@ export async function middleware(request: NextRequest) {
       return addSecurityHeaders(res, request)
     }
 
-    // 其他情況維持原本邏輯（要登入才能看）
-    // In non-mock mode, check Supabase authentication
-    if (!isMock) {
-    try {
-      const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-          cookies: {
-            getAll() {
-              return request.cookies.getAll()
+    // For /generate and /dashboard, check auth unless in preview demo mode
+    if ((isGenerate || isDashboard) && !(isPreviewEnv && isDemoMode)) {
+      // Check Supabase authentication for /generate and /dashboard
+      try {
+        const supabase = createServerClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+          {
+            cookies: {
+              getAll() {
+                return request.cookies.getAll()
+              },
+              setAll(cookiesToSet) {
+                // Cookies will be set by the response
+              },
             },
-            setAll(cookiesToSet) {
-              // Cookies will be set by the response
-            },
-          },
+          }
+        )
+
+        const {
+          data: { user },
+        } = await supabase.auth.getUser()
+
+        if (!user) {
+          // Redirect to login if not authenticated (307 Temporary Redirect)
+          const loginUrl = new URL("/auth/login", request.url)
+          loginUrl.searchParams.set("redirect", pathname)
+          const response = NextResponse.redirect(loginUrl, { status: 307 })
+          return addSecurityHeaders(response, request)
         }
-      )
-
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      if (!user) {
-        // Redirect to login if not authenticated (307 Temporary Redirect)
-        const loginUrl = new URL("/auth/login", request.url)
-        loginUrl.searchParams.set("redirect", pathname)
-        const response = NextResponse.redirect(loginUrl, { status: 307 })
-        return addSecurityHeaders(response, request)
+        
+        // Log user ID in dev mode for debugging
+        if (process.env.NODE_ENV !== "production") {
+          console.log(`[middleware] Authenticated user accessing ${pathname}:`, user.id)
+        }
+      } catch (error) {
+        // If Supabase is not configured, allow access (for development)
+        console.warn("Supabase auth check failed:", error)
       }
-    } catch (error) {
-      // If Supabase is not configured, allow access (for development)
-      console.warn("Supabase auth check failed:", error)
+    }
+
+    // For other protected routes (/orders, /results, /settings), check auth
+    const isOtherProtectedRoute = isProtectedRoute && 
+      pathname !== "/generate" && 
+      pathname !== "/dashboard"
+    
+    if (isOtherProtectedRoute) {
+      // 其他情況維持原本邏輯（要登入才能看）
+      // In non-mock mode, check Supabase authentication
+      if (!isMock) {
+        try {
+          const supabase = createServerClient(
+            process.env.NEXT_PUBLIC_SUPABASE_URL!,
+            process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+            {
+              cookies: {
+                getAll() {
+                  return request.cookies.getAll()
+                },
+                setAll(cookiesToSet) {
+                  // Cookies will be set by the response
+                },
+              },
+            }
+          )
+
+          const {
+            data: { user },
+          } = await supabase.auth.getUser()
+
+          if (!user) {
+            // Redirect to login if not authenticated (307 Temporary Redirect)
+            const loginUrl = new URL("/auth/login", request.url)
+            loginUrl.searchParams.set("redirect", pathname)
+            const response = NextResponse.redirect(loginUrl, { status: 307 })
+            return addSecurityHeaders(response, request)
+          }
+        } catch (error) {
+          // If Supabase is not configured, allow access (for development)
+          console.warn("Supabase auth check failed:", error)
+        }
       }
     }
   }

@@ -4,11 +4,16 @@ import type React from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
-import { Mail, Sparkles, Send, Loader2 } from "lucide-react"
+import { Mail, Sparkles, Send, Loader2, TestTube } from "lucide-react"
 import { useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { supabase } from "@/lib/supabaseClient"
 
-export function LoginClient() {
+interface LoginClientProps {
+  allowTestLogin?: boolean
+}
+
+export function LoginClient({ allowTestLogin = false }: LoginClientProps) {
   const [email, setEmail] = useState("")
   const [sent, setSent] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -136,16 +141,100 @@ export function LoginClient() {
             <p className="text-sm text-primary">Check your inbox! We've sent you a secure login link.</p>
           </div>
         )}
-
-        {/* DEBUG: 顯示當前 redirectTo 值（超明顯的紅色 debug 標籤） */}
-        <div style={{ color: "red", fontSize: 12 }} className="mt-4 text-center font-mono">
-          DEBUG redirectTo (runtime):{" "}
-          {typeof window !== "undefined"
-            ? `${window.location.origin}/auth/callback`
-            : (process.env.NEXT_PUBLIC_SITE_URL ?? "https://family-mosaic-maker.vercel.app") + "/auth/callback"}
-        </div>
       </form>
+
+      {/* Test Login Button (Dev Only) */}
+      {allowTestLogin && (
+        <div className="mt-6 pt-6 border-t border-border">
+          <TestLoginButton />
+        </div>
+      )}
     </Card>
+  )
+}
+
+/**
+ * Test Login Button Component
+ * Only shown when NEXT_PUBLIC_ALLOW_TEST_LOGIN=true (dev mode only)
+ */
+function TestLoginButton() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const handleTestLogin = async () => {
+    setLoading(true)
+    setError(null)
+
+    try {
+      // Use test@example.com as default test user
+      const testEmail = "test@example.com"
+      const testPassword = "test-password-123"
+
+      // Call /api/test/login endpoint
+      const response = await fetch("/api/test/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          email: testEmail,
+          password: testPassword,
+        }),
+      })
+
+      const data = await response.json()
+
+      if (!response.ok || !data.ok) {
+        throw new Error(data.error || "Test login failed")
+      }
+
+      // Wait a bit for cookies to be set, then redirect
+      // Get redirect target from URL params or default to /dashboard
+      const redirectTo = searchParams.get("redirect") || "/dashboard"
+      
+      // Small delay to ensure cookies are set
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      // Use window.location.href for full page reload to ensure cookies are sent
+      window.location.href = redirectTo
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to test login")
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="text-center">
+        <p className="text-xs text-muted-foreground mb-2">Development Only</p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleTestLogin}
+          disabled={loading}
+          className="w-full"
+        >
+          {loading ? (
+            <>
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              Logging in...
+            </>
+          ) : (
+            <>
+              <TestTube className="w-4 h-4 mr-2" />
+              Test Login (Dev Only)
+            </>
+          )}
+        </Button>
+      </div>
+      {error && (
+        <div className="text-center p-2 rounded-lg bg-destructive/10 border border-destructive/20">
+          <p className="text-xs text-destructive">{error}</p>
+        </div>
+      )}
+    </div>
   )
 }
 

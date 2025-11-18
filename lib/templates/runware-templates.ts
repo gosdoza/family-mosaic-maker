@@ -33,9 +33,27 @@ export function resolveRunwareTemplate(
 ): RunwareTemplateConfig | null {
   // RUNWARE-NOTE: Only support christmas + realistic for now
   if (template === "christmas" && style === "realistic") {
+    // TODO: Replace with actual Runware model ID from your Runware dashboard
+    // Common Runware model IDs might be like: "stable-diffusion-xl", "flux", etc.
+    // Check Runware API documentation or dashboard for available models
+    // You can also set RUNWARE_MODEL_ID env var to override the placeholder
+    const modelId = process.env.RUNWARE_MODEL_ID || "RUNWARE_MODEL_CHRISTMAS_REALISTIC_V1"
+    
+    // Validate modelId is not empty/undefined
+    if (!modelId || modelId.trim() === "" || modelId === "RUNWARE_MODEL_CHRISTMAS_REALISTIC_V1") {
+      // In dev, log a warning
+      if (process.env.NODE_ENV !== "production") {
+        console.warn(
+          "[runware-templates] WARNING: Using placeholder modelId. " +
+          "Set RUNWARE_MODEL_ID env var or update template config with actual Runware model ID. " +
+          "Check Runware API docs for available models."
+        )
+      }
+    }
+    
     return {
       id: "christmas_realistic_v1",
-      modelId: "RUNWARE_MODEL_CHRISTMAS_REALISTIC_V1", // RUNWARE-TODO: replace with real model id
+      modelId, // Use env var if set, otherwise placeholder
       basePrompt:
         "cozy family Christmas portrait in living room, warm lighting, smiling family, high detail, 4k, DSLR, bokeh background",
       negativePrompt:

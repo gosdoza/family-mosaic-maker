@@ -38,7 +38,8 @@ export default function ProgressPage() {
 
     let canceled = false
     let pollCount = 0
-    const maxPolls = 60 // 最多轮询 60 次（90 秒）
+    const maxPolls = 20 // 最多轮询 20 次（100 秒，5秒间隔）
+    const pollIntervalMs = 5000 // 轮询间隔：5 秒（降低 API 调用频率）
 
     // 立即检查一次状态（不等待第一次 interval）
     const checkStatus = async () => {
@@ -53,7 +54,7 @@ export default function ProgressPage() {
 
         const data: ProgressResponse = await response.json()
         
-        console.log("[progress] polling", { jobId, status: data.status, progress: data.progress })
+        console.log("[progress] polling", { jobId, status: data.status, progress: data.progress, pollCount })
         
         // 更新 UI 状态
         if (!canceled) {
@@ -71,8 +72,11 @@ export default function ProgressPage() {
           }
           return true // 返回 true 表示已完成，不需要继续 polling
         } else if (data.status === "failed") {
+          // TASK 3: Stop polling on failed status and show error message
           if (!canceled) {
-            setError("Generation failed. Please try again.")
+            setError("圖片生成失敗，請稍後重新整理頁面或再試一次。如果多次失敗，請聯繫開發者。")
+            setStatus("failed")
+            setProgress(100)
           }
           return true // 返回 true 表示已失败，不需要继续 polling
         }
@@ -95,6 +99,9 @@ export default function ProgressPage() {
       pollInterval = setInterval(async () => {
         if (canceled || pollCount >= maxPolls) {
           if (pollInterval) clearInterval(pollInterval)
+          if (pollCount >= maxPolls && !canceled) {
+            setError("生成時間較久，請稍後重新整理頁面或再試一次。")
+          }
           return
         }
 
@@ -104,7 +111,7 @@ export default function ProgressPage() {
         if (completed && pollInterval) {
           clearInterval(pollInterval)
       }
-      }, 1000) // 每 1 秒轮询一次
+      }, pollIntervalMs) // 每 5 秒轮询一次
     })
 
     return () => {
@@ -162,7 +169,8 @@ export default function ProgressPage() {
   useEffect(() => {
     if (isMock || !jobId || isDemoJob(jobId)) return
 
-    const t = setInterval(() => setTick((x) => x + 1), 1500) // 每 1.5 秒轮询一次
+    const pollIntervalMs = 5000 // 轮询间隔：5 秒（降低 API 调用频率）
+    const t = setInterval(() => setTick((x) => x + 1), pollIntervalMs)
     return () => clearInterval(t)
   }, [isMock, jobId])
 
@@ -171,8 +179,19 @@ export default function ProgressPage() {
     if (isMock || !jobId || isDemoJob(jobId)) return
 
     let canceled = false
+    let pollCount = 0
+    const maxPolls = 20 // 最多轮询 20 次（100 秒，5秒间隔）
 
     async function poll() {
+      if (canceled || pollCount >= maxPolls) {
+        if (pollCount >= maxPolls && !canceled) {
+          setError("生成時間較久，請稍後重新整理頁面或再試一次。")
+        }
+        return
+      }
+
+      pollCount++
+
       try {
         const response = await fetch(`/api/progress/${jobId}`)
         if (!response.ok) {
@@ -202,8 +221,13 @@ export default function ProgressPage() {
             return
           }
 
+          // TASK 3: Stop polling on failed status and show error message
           if (data.status === "failed") {
-            setError("Generation failed. Please try again.")
+            setError("圖片生成失敗，請稍後重新整理頁面或再試一次。如果多次失敗，請聯繫開發者。")
+            setStatus("failed")
+            setProgress(100)
+            // Stop polling by returning early
+            return
           }
         }
       } catch (error) {
@@ -289,7 +313,17 @@ export default function ProgressPage() {
                   ? "Your beautiful family moment is ready!"
                   : status === "failed"
                   ? "Something went wrong. Please try again."
-                  : "Our AI is creating your beautiful family moment"}
+                  : (() => {
+                      // 讀取前端旗標判斷是否啟用 Runware
+                      const runwareEnabled =
+                        typeof process.env.NEXT_PUBLIC_RUNWARE_ENABLED === "string"
+                          ? process.env.NEXT_PUBLIC_RUNWARE_ENABLED !== "false" &&
+                            process.env.NEXT_PUBLIC_RUNWARE_ENABLED !== "0"
+                          : false
+                      return runwareEnabled
+                        ? "Our AI is creating your beautiful family moment (may consume credits)"
+                        : "Creating your beautiful family moment (demo mode)"
+                    })()}
               </p>
             </div>
 

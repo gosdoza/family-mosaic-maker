@@ -10,6 +10,17 @@ import { getGenerationProvider, getProviderType } from "@/lib/generation/getProv
 import { isPreviewEnv, runwareMode } from "@/lib/featureFlags"
 
 /**
+ * Provider Decision Rules:
+ * 
+ * The provider is determined by the following logic (in order):
+ * 1. If useReal checkbox is checked (useReal === true) AND
+ *    RUNWARE_ENABLED === true AND
+ *    template/style is supported (currently: christmas + realistic) → use Runware
+ * 2. Otherwise → use Mock
+ * 
+ * Important: When Mock provider is selected, the request must NEVER call Runware
+ * or consume credits. The Mock provider should always succeed in the normal case.
+ * 
  * 主要流程：
  * 1. 認證檢查（測試環境可豁免）
  * 2. 記錄 gen_start 事件
@@ -112,7 +123,12 @@ export async function POST(request: NextRequest) {
 
     // 測試環境專用的穩定成功路徑（不影響 production）
     // 條件：NODE_ENV !== 'production' 且 ALLOW_TEST_LOGIN === 'true'
-    const isTestModeForMock = process.env.NODE_ENV !== 'production' && process.env.ALLOW_TEST_LOGIN === 'true'
+    // BUT: 如果設定了 NEXT_PUBLIC_FORCE_REAL_GENERATE=true 或 NEXT_PUBLIC_RUNWARE_MODE=real，則跳過此路徑
+    const isTestModeForMock = 
+      process.env.NODE_ENV !== 'production' && 
+      process.env.ALLOW_TEST_LOGIN === 'true' &&
+      process.env.NEXT_PUBLIC_FORCE_REAL_GENERATE !== 'true' &&
+      runwareMode !== 'real'
     
     if (isTestModeForMock) {
       const mockJobId = 'test-job-001'
@@ -120,35 +136,60 @@ export async function POST(request: NextRequest) {
       console.log('[generate] test-mode mock response', {
         jobId: mockJobId,
         request_id: mockRequestId,
+        reason: 'ALLOW_TEST_LOGIN=true and not forcing real generate',
       })
       return NextResponse.json(
         {
           ok: true,
-          provider: 'runware',
+          provider: 'mock',
           jobId: mockJobId,
           request_id: mockRequestId,
+          isFallback: false,
         },
         { status: 200 },
       )
     }
     
     // 使用 Provider 系統（Mock 或 Runware）
-    const provider = getGenerationProvider()
+    let provider = getGenerationProvider() // Changed to let for reassignment
     
     // 解析請求（支援 FormData 或 JSON）
     let files: File[] = []
     let style: string = ""
     let template: string = ""
+    let useReal: boolean = false // TASK 1: Per-request flag for real AI
     
     const contentType = request.headers.get("content-type") || ""
     if (contentType.includes("multipart/form-data")) {
       try {
         const formData = await request.formData()
         files = formData.getAll("files") as File[]
-        style = formData.get("style") as string || ""
-        template = formData.get("template") as string || ""
+        style = (formData.get("style") as string) || ""
+        template = (formData.get("template") as string) || ""
+        // 修復：正確解析 FormData 中的 useReal（可能是 string 或 File）
+        const useRealValue = formData.get("useReal")
+        if (useRealValue !== null) {
+          // FormData.get() 返回 FormDataEntryValue，可能是 string 或 File
+          const useRealStr = typeof useRealValue === "string" ? useRealValue : useRealValue.name
+          useReal = useRealStr === "true" || useRealStr === true
+        } else {
+          useReal = false
+        }
+        
+        // Debug log
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[api/generate] parsed FormData", {
+            useRealValue,
+            useRealStr: typeof useRealValue === "string" ? useRealValue : useRealValue.name,
+            useReal,
+            style,
+            template,
+            filesCount: files.length,
+          })
+        }
       } catch (error) {
-        // 忽略解析錯誤
+        console.error("[api/generate] FormData parse error:", error)
+        // 忽略解析錯誤，使用預設值
       }
     } else {
       try {
@@ -156,23 +197,85 @@ export async function POST(request: NextRequest) {
         files = (body.files || []) as File[]
         style = body.style || ""
         template = body.template || ""
+        // 修復：正確解析 JSON body 中的 useReal
+        useReal = body.useReal === true || body.useReal === "true"
+        
+        // Debug log
+        if (process.env.NODE_ENV !== "production") {
+          console.log("[api/generate] parsed JSON body", {
+            useReal: body.useReal,
+            useRealParsed: useReal,
+            style,
+            template,
+            filesCount: files.length,
+          })
+        }
       } catch (error) {
-        // 忽略解析錯誤
+        console.error("[api/generate] JSON parse error:", error)
+        // 忽略解析錯誤，使用預設值
       }
     }
     
     // Route B: Real Runware API integration with fallback to mock
-    // Priority: preview → mock, runware enabled + supported template → runware, else → mock
-    
-    // Always use mock for preview environment (Route A/C/D)
-    const shouldUseMock = isPreviewEnv // Preview always uses mock for safety
+    // Priority: useReal checkbox → runware (if enabled), else → mock
     
     // Check if Runware is enabled and template/style is supported
     const isRunwareSupported = template === "christmas" && style === "realistic"
-    const isRunwareEnabled = runwareMode === "real" && provider.name === "runware"
+    // 總開關檢查：RUNWARE_ENABLED 必須為 true 才能使用 Runware
+    const runwareEnabledFlag = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
     
-    // Try Runware first if enabled and supported, and not in preview/demo mode
-    if (!shouldUseMock && isRunwareEnabled && isRunwareSupported) {
+    // 修復：Provider decision 邏輯
+    // - 如果 useReal === true 且 RUNWARE_ENABLED === true 且 template/style 支援 → 使用 Runware
+    // - 否則 → 使用 Mock
+    // 不再依賴 runwareMode，直接根據 useReal checkbox 和 RUNWARE_ENABLED 決定
+    let finalProviderName: "mock" | "runware" = "mock"
+    
+    if (useReal && runwareEnabledFlag && isRunwareSupported) {
+      // 使用者勾選了 checkbox，且 Runware 已啟用，且 template/style 支援 → 使用 Runware
+      finalProviderName = "runware"
+      try {
+        const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
+        provider = createRunwareProvider()
+      } catch (error) {
+        // 如果 RunwareProvider 創建失敗（例如缺少 API key），fallback 到 mock
+        console.warn("[api/generate] Failed to create RunwareProvider, falling back to mock:", error)
+        finalProviderName = "mock"
+        const { createMockProvider } = await import("@/lib/generation/providers/mock")
+        provider = createMockProvider()
+      }
+    } else {
+      // 使用 Mock Provider
+      finalProviderName = "mock"
+      if (provider.name !== "mock") {
+        const { createMockProvider } = await import("@/lib/generation/providers/mock")
+        provider = createMockProvider()
+      }
+    }
+    
+    // 修復：isRunwareEnabled 應該基於最終決定的 provider
+    const isRunwareEnabled = finalProviderName === "runware" && runwareEnabledFlag && useReal && isRunwareSupported
+    
+    // Log provider decision (dev only)
+    if (process.env.NODE_ENV !== "production") {
+      console.log("[api/generate] provider decision", {
+        providerName: finalProviderName,
+        useRealFromRequest: useReal,
+        runwareEnabledFlag,
+        isRunwareSupported,
+        isRunwareEnabled,
+        template,
+        style,
+        envRunwareEnabled: process.env.RUNWARE_ENABLED,
+        envNextPublicRunwareEnabled: process.env.NEXT_PUBLIC_RUNWARE_ENABLED,
+      })
+    }
+    
+    // Track if we attempted Runware (for isFallback calculation)
+    let attemptedRunware = false
+    
+    // Try Runware first if enabled and supported
+    if (isRunwareEnabled) {
+      attemptedRunware = true
       try {
         const fileUrls = await getFileUrls(files, user.id)
         // 將 userId 傳入 payload（provider 可能需要）
@@ -194,42 +297,79 @@ export async function POST(request: NextRequest) {
           },
         })
 
-        return NextResponse.json({ ok: true, jobId, request_id: requestId })
-      } catch (error: any) {
-        // RUNWARE-NOTE: If RunwareProvider fails, fallback to mock
-        console.error("[generate] RunwareProvider failed, falling back to mock:", {
-          error: error.message,
-          status: error.status,
-          name: error.name,
-        })
-        
-        // Log fallback event
-        await logAnalyticsEvent({
-          event_type: "gen_fail",
+        return NextResponse.json({ 
+          ok: true, 
+          jobId, 
           request_id: requestId,
-          user_id: user.id,
-          error: "RUNWARE_FALLBACK",
-          data: {
-            error_message: error.message,
-            error_status: error.status,
-            template,
-            style,
-            fallback_to: "mock",
-          },
+          provider: "runware",
+          isFallback: false,
         })
+      } catch (error: any) {
+        // 如果錯誤是 RUNWARE_DISABLED，直接 fallback 到 mock，不要重試 Runware
+        if (error?.message === "RUNWARE_DISABLED" || error?.name === "RunwareDisabledError") {
+          console.log("[api/generate] RUNWARE_DISABLED, fallback to mock provider")
+          // Fall through to mock provider below
+        } else {
+          // RUNWARE-NOTE: If RunwareProvider fails, fallback to mock
+          console.error("[api/generate] RunwareProvider failed, falling back to mock:", {
+            error: error.message,
+            status: error.status,
+            name: error.name,
+            stack: error.stack,
+          })
+          
+          // Log fallback event
+          await logAnalyticsEvent({
+            event_type: "gen_fail",
+            request_id: requestId,
+            user_id: user.id,
+            error: "RUNWARE_FALLBACK",
+            data: {
+              error_message: error.message,
+              error_status: error.status,
+              template,
+              style,
+              fallback_to: "mock",
+            },
+          })
+        }
         
         // Fall through to mock provider below
       }
     }
 
     // Use Mock Provider for all other cases:
-    // - Preview environment (Route A/C/D)
+    // - useReal checkbox is unchecked
     // - Runware not enabled
     // - Template/style not supported
     // - Runware failed (fallback)
-    const fileUrls = files.map(f => f.name || "")
-    const mockProvider = getGenerationProvider() // Get mock provider explicitly
-    const { jobId } = await mockProvider.generate({ files: fileUrls, style, template })
+    // Ensure we use the mock provider that was already determined above
+    const fileUrls = files.map(f => (f instanceof File ? f.name : String(f)) || "")
+    
+    // Use the provider we already determined (should be mock at this point)
+    // Mock provider.generate() should never throw in normal cases
+    let jobId: string
+    try {
+      const result = await provider.generate({ files: fileUrls, style, template })
+      if (!result.ok || !result.jobId) {
+        throw new Error("Mock provider.generate() returned invalid result")
+      }
+      jobId = result.jobId
+    } catch (error: any) {
+      // This should never happen for Mock provider, but handle gracefully
+      console.error("[api/generate] Mock provider.generate() failed:", {
+        request_id: requestId,
+        provider: provider.name,
+        error: error.message,
+        stack: error.stack,
+      })
+      throw new Error(`Mock generation failed: ${error.message || "Unknown error"}`)
+    }
+    
+    // Determine if this is a fallback from Runware
+    // isFallback is true only if we tried Runware first (attemptedRunware === true) but it failed
+    const isFallback = attemptedRunware && finalProviderName === "mock"
+    const fallbackReason = attemptedRunware ? "runware_failed" : undefined
     
     // 记录 gen_ok 事件（Mock 模式）
     await logAnalyticsEvent({
@@ -243,28 +383,87 @@ export async function POST(request: NextRequest) {
         model_id: null,
         template,
         style,
-        fallback_reason: isRunwareEnabled && !isRunwareSupported ? "template_not_supported" : 
-                         isRunwareEnabled && isRunwareSupported ? "runware_failed" : undefined,
+        fallback_reason: fallbackReason,
+        is_fallback: isFallback,
       },
     })
 
-    return NextResponse.json({ ok: true, jobId, request_id: requestId })
+    return NextResponse.json({ 
+      ok: true, 
+      jobId, 
+      request_id: requestId,
+      provider: "mock",
+      isFallback: isFallback || false,
+    })
   } catch (error: any) {
-    console.error("Error in generate API:", error)
+    const isDev = process.env.NODE_ENV !== "production"
+    
+    // Enhanced error logging: Always log request_id, provider name, and error details
+    // This helps correlate errors with the JSON response
+    console.error("[api/generate] Error caught in outer try-catch:", {
+      request_id: requestId,
+      provider: finalProviderName || "unknown",
+      useRealFromRequest: useReal,
+      error_name: error.name || "Error",
+      error_message: error.message || "Unknown error",
+      error_stack: error.stack,
+      error_status: error.status,
+      error_code: error.code,
+      // Additional Runware-specific error fields
+      responseBody: error.responseBody,
+      responseBodyText: error.responseBodyText,
+      xRequestId: error.xRequestId,
+      originalError: error.originalError,
+      cause: error.cause,
+    })
     
     // 记录错误事件
     await logAnalyticsEvent({
       event_type: "gen_fail",
       request_id: requestId,
       user_id: user?.id || null,
-      error: "internal_error",
-      data: { message: error.message || "Unknown error" },
+      error: error.name || "internal_error",
+      data: { 
+        message: error.message || "Unknown error",
+        status: error.status,
+        code: error.code,
+        provider: finalProviderName || "unknown",
+        useReal,
+      },
     })
 
-    return NextResponse.json(
-      { error: "Failed to process generation request", request_id: requestId },
-      { status: 500 }
-    )
+    // 構建錯誤回應
+    // This 500 response is triggered when:
+    // - provider.generate() throws an unexpected error
+    // - Request parsing fails (FormData/JSON)
+    // - Analytics logging fails (unlikely, as it's wrapped in try-catch)
+    // - Any other unexpected error in the handler
+    const basePayload: any = {
+      error: "Failed to process generation request",
+      request_id: requestId,
+    }
+
+    // 在 dev 環境下，添加 debug 資訊
+    if (isDev) {
+      basePayload.debug = {
+        source: error.name === "RunwareGenerateError" ? "runware" : 
+                finalProviderName === "mock" ? "mock" : "unknown",
+        code: error.code || "INTERNAL_ERROR",
+        name: error.name || "Error",
+        message: error.message || "Unknown error",
+        status: error.status,
+        statusText: error.statusText,
+        // 如果有 response body，也包含進來（但限制長度）
+        responseBody: error.responseBody 
+          ? (typeof error.responseBody === "string" 
+              ? error.responseBody.substring(0, 500)
+              : JSON.stringify(error.responseBody).substring(0, 500))
+          : undefined,
+        xRequestId: error.xRequestId,
+      }
+    }
+
+    return NextResponse.json(basePayload, { status: 500 })
   }
 }
 

@@ -25,13 +25,18 @@ export function getGenerationProvider(): GenerationProvider {
   const envProvider = process.env.GENERATION_PROVIDER?.toLowerCase()
   const useMockFlag = process.env.NEXT_PUBLIC_USE_MOCK === "true"
   
+  // 總開關檢查：如果 RUNWARE_ENABLED=false，強制使用 mock
+  const runwareEnabledFlag = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
+  
   // RUNWARE-NOTE: Use feature flags for provider selection
-  // Priority: GENERATION_PROVIDER → runwareMode → NEXT_PUBLIC_USE_MOCK → default mock
+  // Priority: RUNWARE_ENABLED → GENERATION_PROVIDER → runwareMode → NEXT_PUBLIC_USE_MOCK → default mock
   let provider: ProviderType = "mock"
   
-  if (envProvider === "mock" || envProvider === "runware" || envProvider === "fal") {
+  if (envProvider === "mock" || envProvider === "fal") {
     provider = envProvider
-  } else if (runwareMode === "real") {
+  } else if (envProvider === "runware" && runwareEnabledFlag) {
+    provider = "runware"
+  } else if (runwareMode === "real" && runwareEnabledFlag) {
     provider = "runware"
   } else if (useMockFlag) {
     provider = "mock"
@@ -72,12 +77,19 @@ export function getProviderType(): ProviderType {
   const envProvider = process.env.GENERATION_PROVIDER?.toLowerCase()
   const useMockFlag = process.env.NEXT_PUBLIC_USE_MOCK === "true"
   
-  if (envProvider === "mock" || envProvider === "runware" || envProvider === "fal") {
+  // 總開關檢查：如果 RUNWARE_ENABLED=false，強制返回 mock
+  const runwareEnabledFlag = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
+  
+  if (envProvider === "mock" || envProvider === "fal") {
     return envProvider
   }
   
+  if (envProvider === "runware" && runwareEnabledFlag) {
+    return "runware"
+  }
+  
   // RUNWARE-NOTE: Use feature flags
-  if (runwareMode === "real") {
+  if (runwareMode === "real" && runwareEnabledFlag) {
     return "runware"
   }
   

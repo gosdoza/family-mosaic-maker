@@ -23,7 +23,9 @@ export interface RunwareGenerateRequest {
 }
 
 export interface RunwareGenerateResponse {
-  jobId: string
+  jobId: string // For backward compatibility, maps to taskUUID
+  taskUUID?: string // Actual taskUUID from Runware API
+  imageURL?: string // Image URL from Runware API response
   status: "queued" | "running" | "succeeded" | "failed"
   progress?: number
   resultUrls?: string[]
@@ -33,13 +35,17 @@ export interface RunwareGenerateResponse {
 const RUNWARE_BASE_URL = process.env.RUNWARE_BASE_URL || "https://api.runware.ai"
 const RUNWARE_API_URL = process.env.RUNWARE_API_URL || `${RUNWARE_BASE_URL}/v1`
 const RUNWARE_API_KEY = process.env.RUNWARE_API_KEY
-const TIMEOUT_MS = 8000 // 8 秒超时
-const MAX_RETRIES = 2 // 最多重试 2 次
+const TIMEOUT_MS = Number(process.env.RUNWARE_TIMEOUT_MS ?? 120_000) // 120 秒超时，暫時拉長確認是否為 timeout 問題
+const MAX_RETRIES = 1 // 避免過多重試
 const RETRY_DELAY_MS = 1000 // 初始重试延迟 1 秒
 const HEALTH_CHECK_TIMEOUT_MS = 5000 // 健康检查超时 5 秒
+const DEFAULT_NEGATIVE_PROMPT = "blurry, distorted faces, extra limbs, low quality, text, watermark"
 
 /**
  * 调用 Runware API 生成图片
+ * 
+ * ⚠️ Only call Runware API when RUNWARE_ENABLED === true (prod only, may consume credits)
+ * This function should only be called from RunwareProvider.generate() which checks RUNWARE_ENABLED first.
  */
 export async function callRunwareAPI(
   request: RunwareGenerateRequest,
@@ -58,67 +64,89 @@ export async function callRunwareAPI(
 
   let lastError: Error | null = null
 
+  // Generate taskUUID at the start (used for all retry attempts)
+  const taskUUID =
+    (typeof crypto !== "undefined" && "randomUUID" in crypto)
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       // 创建带超时的 AbortController
       const controller = new AbortController()
       const timeoutId = setTimeout(() => controller.abort(), timeout)
 
-      const url = `${RUNWARE_API_URL}/generate`
+      // Runware HTTP API endpoint: https://api.runware.ai/v1 (no /generate suffix)
+      const url = RUNWARE_API_URL
       const method = "POST"
       
       // 将 RunwareGenerateRequest 转换为 Runware API 需要的格式
       // Use template config prompt if provided, otherwise fallback to style + template
       const prompt = request.prompt || `${request.style} ${request.template}`.trim()
       
-      // Use template config model if provided, otherwise fallback to "default"
-      const model = request.model || "default"
+      // 暫時強制使用 Runware 官方推薦的 image model（先讓最基本案例一定成功）
+      const model = "runware:101@1" // FLUX.1 Dev 官方範例
       
-      // 使用第一个文件 URL 作为 image_url（如果有且是有效 URL）
-      let imageUrl: string | undefined = undefined
+      // 使用第一个文件 URL 作为 imageURL（如果有且是有效 URL）
+      let imageURL: string | undefined = undefined
       if (request.files.length > 0) {
         const firstFile = request.files[0]
         try {
           const urlObj = new URL(firstFile)
           // 排除占位符域名
           if (!urlObj.hostname.includes("example.com") && !urlObj.hostname.includes("localhost")) {
-            imageUrl = firstFile
+            imageURL = firstFile
           }
         } catch {
           // 不是有效 URL，忽略
         }
       }
       
-      // 构建符合 Runware API 的 payload
-      const runwarePayload: RunwarePayload = {
+      // 构建符合 Runware HTTP API 官方规格的 payload
+      // Payload must be an array containing task objects with taskUUID and positivePrompt
+      // 對齊官方 Text-to-image 範例格式
+      // 預設使用 sync 模式（deliveryMethod="sync"），直接返回結果，避免 polling
+      const task: any = {
         taskType: "imageInference",
-        prompt,
+        taskUUID,
+        positivePrompt: prompt,
+        negativePrompt: request.negativePrompt ?? "",
         model,
-        ...(imageUrl && { image_url: imageUrl }),
-        ...(request.negativePrompt && { negativePrompt: request.negativePrompt }),
-        ...(request.width && { width: request.width }),
-        ...(request.height && { height: request.height }),
+        width: request.width ?? 768,
+        height: request.height ?? 768,
+        steps: request.steps ?? 24,
+        numberResults: request.numberResults ?? 1,
+        // 新增的建議欄位（對齊官方範例）
+        outputType: (request as any).outputType ?? "URL",
+        outputFormat: (request as any).outputFormat ?? "JPG",
+        CFGScale: (request as any).CFGScale ?? 7.5,
+        deliveryMethod: (request as any).deliveryMethod ?? "sync", // 預設 sync 模式
+        ...(imageURL && { imageURL }),
       }
       
-      // Runware API 要求 payload 必须是数组格式
-      const payloadArray = [runwarePayload]
-      const body = JSON.stringify(payloadArray)
+      // Runware HTTP API 要求 payload 是「陣列」格式
+      const payload = [task]
       const headers = {
-        "Authorization": `Bearer ${RUNWARE_API_KEY}`,
         "Content-Type": "application/json",
-      }
-
-      // 请求前日志（不泄露密钥）
-      console.log(JSON.stringify({
-        tag: "runware.generate.request",
+        "Authorization": `Bearer ${RUNWARE_API_KEY}`,
+      } as const
+      const body = JSON.stringify(payload)
+      
+      // 強化 request log（發送前）
+      console.log("[runware-client] request", {
         url,
         method,
-        "headers.content-type": headers["Content-Type"],
-        hasApiKey: !!RUNWARE_API_KEY,
-        bodyKeys: Object.keys(runwarePayload),
-        attempt: attempt + 1,
-        maxRetries: maxRetries + 1,
-      }))
+        hasApiKey: Boolean(RUNWARE_API_KEY),
+        payloadIsArray: Array.isArray(payload),
+        payloadLength: payload.length,
+        taskType: task.taskType,
+        model: task.model,
+        width: task.width,
+        height: task.height,
+        steps: task.steps,
+        deliveryMethod: task.deliveryMethod,
+        outputType: task.outputType,
+      })
 
       try {
         const response = await fetch(url, {
@@ -130,6 +158,13 @@ export async function callRunwareAPI(
 
         clearTimeout(timeoutId)
 
+        // 強化 response log（收到回應後，解析前）
+        console.log("[runware-client] response", {
+          status: response.status,
+          ok: response.ok,
+          statusText: response.statusText,
+        })
+
         // 读取响应体（用于日志）
         let responseBodyText = ""
         let responseData: any = null
@@ -137,51 +172,109 @@ export async function callRunwareAPI(
         
         try {
           responseBodyText = await response.text()
+          const shortBody = responseBodyText.slice(0, 500)
+          console.log("[runware-client] responseBody", shortBody)
+          
           // 尝试解析 JSON
           try {
             responseData = JSON.parse(responseBodyText)
           } catch {
             // 如果不是 JSON，使用原始文本
             responseData = responseBodyText
+            console.error("[runware-client] failed to parse JSON response", {
+              responseBodyText: shortBody,
+            })
           }
         } catch (e) {
-          // 忽略读取错误
+          console.error("[runware-client] failed to read response body", e)
         }
-
-        // 响应日志
-        const shortBody = typeof responseData === "string" 
-          ? responseData.substring(0, 300)
-          : JSON.stringify(responseData).substring(0, 300)
-        
-        console.log(JSON.stringify({
-          tag: "runware.generate.response",
-          status: response.status,
-          statusText: response.statusText,
-          ok: response.ok,
-          shortBody,
-          xRequestId,
-        }))
 
         if (!response.ok) {
           // 4xx/5xx 错误：抛出包含详细信息的错误
-          const errorMessage = responseData?.error || responseData?.message || response.statusText || "Unknown error"
+          // Runware API 错误格式可能包含 errors 数组: [{ code, message, parameter, taskUUID }]
+          const errors = responseData?.errors || []
+          const errorMessage = 
+            errors.length > 0 
+              ? errors.map((e: any) => `${e.code || "ERROR"}: ${e.message || "Unknown"}`).join("; ")
+              : responseData?.error || responseData?.message || responseData?.detail || response.statusText || "Unknown error"
+          const errorCode = errors.length > 0 ? errors[0].code : (responseData?.code || responseData?.error_code || undefined)
+          
           const error = new Error(`Runware API error: ${response.status} ${errorMessage}`) as any
+          error.name = "RunwareAPIError"
           error.status = response.status
           error.statusText = response.statusText
+          error.code = errorCode
           error.responseBody = responseData
-          error.responseBodyText = responseBodyText.substring(0, 300)
+          error.responseBodyText = responseBodyText.substring(0, 500) // 增加長度限制
           error.xRequestId = xRequestId
+          error.errors = errors // Include errors array for detailed debugging
+          
+          // In dev, log full error details
+          if (process.env.NODE_ENV !== "production") {
+            console.error("[runware-client] API error detail:", {
+              status: response.status,
+              statusText: response.statusText,
+              code: errorCode,
+              message: errorMessage,
+              errors,
+              responseBody: responseData,
+              xRequestId,
+            })
+          }
+          
           throw error
         }
 
+        // 成功情况：Runware HTTP API 返回格式为 { data: [{ taskType, taskUUID, imageUUID, imageURL, ... }] }
+        if (!responseData || !Array.isArray(responseData.data) || responseData.data.length === 0) {
+          const error = new Error("Runware API returned empty data") as any
+          error.name = "RunwareAPIError"
+          error.status = response.status
+          error.statusText = response.statusText
+          error.responseBody = responseData
+          error.responseBodyText = responseBodyText.substring(0, 500)
+          error.xRequestId = xRequestId
+          
+          if (process.env.NODE_ENV !== "production") {
+            console.error("[runware-client] Empty data error:", {
+              status: response.status,
+              responseBody: responseData,
+              xRequestId,
+            })
+          }
+          
+          throw error
+        }
+
+        const taskResult = responseData.data[0]
+        const resultImageURL = taskResult.imageURL || taskResult.imageUrl
+
+        // Return response in format compatible with existing code
         return {
-          jobId: responseData.jobId || responseData.job_id,
-          status: responseData.status || "queued",
-          progress: responseData.progress,
-          resultUrls: responseData.resultUrls || responseData.result_urls,
+          jobId: taskResult.taskUUID || taskUUID, // For backward compatibility
+          taskUUID: taskResult.taskUUID || taskUUID,
+          imageURL: resultImageURL,
+          status: "succeeded" as const, // Runware HTTP API returns immediately with result
+          resultUrls: resultImageURL ? [resultImageURL] : [],
         }
       } catch (error: any) {
         clearTimeout(timeoutId)
+        
+        // 處理 AbortError (timeout)
+        if (error?.name === "AbortError") {
+          console.error("[runware-client] AbortError: request timed out", {
+            timeoutMs: TIMEOUT_MS,
+            url,
+          })
+          
+          const abortError = new Error("Runware API error: This operation was aborted (timeout)") as any
+          abortError.name = "RunwareGenerateError"
+          abortError.status = 500
+          abortError.code = "TIMEOUT"
+          abortError.originalError = error
+          throw abortError
+        }
+        
         throw error
       }
     } catch (error: any) {

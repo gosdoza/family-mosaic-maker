@@ -109,3 +109,17 @@ export const isPaypalLive = paypalMode === "live"
 export const isDemoJob = (jobId: string | null | undefined): boolean =>
   jobId === "demo-001"
 
+// ============================================
+// Force Real Generate (Development Override)
+// ============================================
+
+/**
+ * Force real generate mode (override demo/preview flags)
+ * 
+ * When set to true, will force Route B (real /api/generate) even if
+ * isDemoMode or isPreviewEnv are true. Useful for local development
+ * testing of Runware integration.
+ */
+export const isForceRealGenerate =
+  process.env.NEXT_PUBLIC_FORCE_REAL_GENERATE === "true"
+
