@@ -22,7 +22,8 @@ export function createMockProvider(): GenerationProvider {
 export class MockProvider implements GenerationProvider {
   name: "mock" = "mock"
 
-  async generate(input: GenerateRequestPayload): Promise<GenerateResult> {
+  async generate(input: GenerateRequestPayload, options?: { useIdentityFlow?: boolean }): Promise<GenerateResult> {
+    // Mock provider ignores useIdentityFlow option (always uses mock flow)
     // Mock provider.generate() should never fail in normal cases
     // It always returns a valid jobId regardless of input
     try {

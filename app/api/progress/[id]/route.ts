@@ -46,6 +46,21 @@ export async function GET(
       })
     }
 
+    // Task A2: Runware job 的 progress 行為（/api/progress）要「秒完成」
+    // 如果 jobId 以 rw_ 開頭，且 Runware 的 generate() 本身是 sync（一次就拿到 imageURL），直接返回成功狀態
+    if (jobId.startsWith("rw_")) {
+      console.log(`[api/progress] Task A2: Runware job detected (rw_ prefix), returning success immediately for job ${jobId}`)
+      // Task A2 Option A（最簡）：對 rw_... 直接回成功狀態，不再打 Runware status API
+      return NextResponse.json({
+        jobId,
+        status: "succeeded",
+        progress: 100,
+        message: "Generation complete!",
+        provider: "runware",
+        isMock: false,
+      })
+    }
+
     // Route A: demo-001 固定返回成功（全 mock demo flow）
     // NOTE: behavior preserved, just using centralized feature flags
     if (isDemoJob(jobId)) {
@@ -79,10 +94,8 @@ export async function GET(
       })
     }
 
-    // Route B: Use provider system (Mock or Runware)
-    // 修復：判斷 job 是來自 Runware 還是 Mock
-    // - 如果 DB 中有 job 記錄且 status 不是 pending/processing，可能是 Runware job
-    // - 否則，使用 MockProvider（因為 Mock job 不會在 DB 中）
+    // R3: Runware 分支：先查 DB，再查 Runware（避免重複扣點）
+    // 對於非 job_ 開頭的 jobId，先從 DB 查詢狀態
     const serviceClient = createServiceClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.SUPABASE_SERVICE_ROLE_KEY!,
@@ -94,63 +107,153 @@ export async function GET(
       }
     )
     
-    // 先檢查 DB 中是否有這個 job
-    const { data: dbJob } = await serviceClient
+    // R3: 先檢查 DB 中是否有這個 job
+    const { data: dbJob, error: dbJobError } = await serviceClient
       .from("jobs")
-      .select("id, status")
-      .eq("id", jobId)
+      .select("job_id, status, progress, provider")
+      .eq("job_id", jobId)
       .single()
     
-    // 判斷使用哪個 provider
-    // - 如果 DB 中有 job 記錄，可能是 Runware job（Runware 會寫入 DB）
-    // - 如果 DB 中沒有，且不是 demo-001，使用 MockProvider
-    let provider = getGenerationProvider()
-    const isRunwareJob = dbJob !== null && dbJob !== undefined
-    
-    if (isRunwareJob && RUNWARE_ENABLED) {
-      // DB 中有 job，嘗試使用 RunwareProvider
-      try {
-        const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
-        provider = createRunwareProvider()
-      } catch (error) {
-        // 如果 RunwareProvider 創建失敗，fallback 到 mock
-        console.warn("[progress] Failed to create RunwareProvider, using mock:", error)
+    // R3: 如果 DB 中有 job 記錄
+    if (dbJob && !dbJobError) {
+      // R3: 如果 status 是 completed / failed → 直接返回，不查 Runware
+      if (dbJob.status === "completed" || dbJob.status === "failed") {
+        console.log(`[api/progress] R3: Job ${jobId} is ${dbJob.status} in DB, returning without Runware API call`)
+        
+        const statusMap: Record<string, string> = {
+          completed: "succeeded",
+          failed: "failed",
+          queued: "processing",
+          processing: "processing",
+        }
+        
+        return NextResponse.json({
+          jobId,
+          status: statusMap[dbJob.status] || dbJob.status,
+          progress: dbJob.progress || (dbJob.status === "completed" ? 100 : dbJob.status === "failed" ? 100 : 0),
+          message: dbJob.status === "completed" ? "Generation complete!" : dbJob.status === "failed" ? "Generation failed" : undefined,
+        })
       }
-    } else {
-      // DB 中沒有 job，或 Runware 未啟用，使用 MockProvider
-      const { createMockProvider } = await import("@/lib/generation/providers/mock")
-      provider = createMockProvider()
+      
+      // R3: 如果 status 是 queued / processing → 才呼叫 RunwareProvider.getProgress()
+      if (dbJob.status === "queued" || dbJob.status === "processing") {
+        if (!RUNWARE_ENABLED) {
+          // Runware 未啟用，直接返回 DB 狀態
+          return NextResponse.json({
+            jobId,
+            status: "processing",
+            progress: dbJob.progress || 0,
+            message: "Generation in progress...",
+          })
+        }
+        
+        // R3: 使用 RunwareProvider 查詢進度
+        try {
+          const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
+          const runwareProvider = createRunwareProvider()
+          
+          const progress = await runwareProvider.getProgress(jobId)
+          
+          // R3: getProgress() 回來後，更新 DB 裡的 status / progress
+          try {
+            const updateData: any = {
+              updated_at: new Date().toISOString(),
+            }
+            
+            // 映射 ProgressResult 狀態到 DB 狀態
+            if (progress.status === "succeeded") {
+              updateData.status = "completed"
+              updateData.progress = 100
+            } else if (progress.status === "failed") {
+              updateData.status = "failed"
+              updateData.progress = 100
+            } else if (progress.status === "processing" || progress.status === "pending") {
+              updateData.status = "processing"
+              updateData.progress = progress.progress || dbJob.progress || 0
+            }
+            
+            await serviceClient
+              .from("jobs")
+              .update(updateData)
+              .eq("job_id", jobId)
+            
+            console.log(`[api/progress] R3: Updated DB status for job ${jobId}`, updateData)
+          } catch (updateError) {
+            console.error(`[api/progress] R3: Failed to update DB for job ${jobId}:`, updateError)
+            // 即使更新失敗，也繼續返回 progress 結果
+          }
+          
+          // R3: 再把結果回給前端
+          const statusMap: Record<string, string> = {
+            pending: "processing",
+            processing: "processing",
+            succeeded: "succeeded",
+            failed: "failed",
+          }
+          
+          const apiStatus = statusMap[progress.status] || progress.status
+          
+          // 記錄 progress_tick 事件
+          await logAnalyticsEvent({
+            event_type: "progress_tick",
+            job_id: jobId,
+            data: {
+              status: progress.status,
+              progress: progress.progress,
+              provider: "runware",
+            },
+          })
+          
+          return NextResponse.json({
+            jobId,
+            status: apiStatus,
+            progress: progress.progress,
+            message: progress.message || progress.errorMessage,
+          })
+        } catch (error: any) {
+          console.error(`[api/progress] R3: Error in RunwareProvider.getProgress:`, error)
+          
+          // R3: 如果 Runware API 錯誤，更新 DB 為 failed
+          try {
+            await serviceClient
+              .from("jobs")
+              .update({
+                status: "failed",
+                progress: 100,
+                updated_at: new Date().toISOString(),
+              })
+              .eq("job_id", jobId)
+          } catch (updateError) {
+            console.error(`[api/progress] R3: Failed to update DB to failed for job ${jobId}:`, updateError)
+          }
+          
+          // 返回 failed 狀態，停止 polling
+          return NextResponse.json({
+            jobId,
+            status: "failed",
+            progress: 100,
+            message: "Generation failed",
+          })
+        }
+      }
     }
     
+    // R3: 如果 DB 中沒有 job 記錄，使用 MockProvider（fallback）
+    // 這可能是舊的 mock job 或測試 job
+    const { createMockProvider } = await import("@/lib/generation/providers/mock")
+    const mockProvider = createMockProvider()
+    
     try {
-      const progress = await provider.getProgress(jobId)
+      const progress = await mockProvider.getProgress(jobId)
       
-      // 修復：Mock provider 永遠不應該返回 failed 狀態
-      // 如果 provider 是 mock 且返回 failed，強制改為 succeeded
-      if (provider.name === "mock" && progress.status === "failed") {
+      // Mock provider 永遠不應該返回 failed 狀態
+      if (progress.status === "failed") {
         console.warn(`[progress] Mock provider returned failed for job ${jobId}, forcing succeeded`)
         return NextResponse.json({
           jobId,
           status: "succeeded",
           progress: 100,
           message: "Generation complete!",
-        })
-      }
-      
-      // TASK 2: If status is failed, return it immediately without retrying
-      if (progress.status === "failed") {
-        const statusMap: Record<string, string> = {
-          pending: "processing",
-          processing: "processing",
-          succeeded: "succeeded",
-          failed: "failed",
-        }
-        
-        return NextResponse.json({
-          jobId,
-          status: statusMap[progress.status] || "failed",
-          progress: progress.progress || 100,
-          message: progress.message || progress.errorMessage || "Generation failed",
         })
       }
       
@@ -161,22 +264,19 @@ export async function GET(
         data: {
           status: progress.status,
           progress: progress.progress,
-          provider: provider.name,
+          provider: "mock",
         },
       })
-
-      // 正規化狀態（與現有 API 回應格式一致）
-      // ProgressResult 狀態: pending/processing/succeeded/failed
-      // API 回應狀態: queued/processing/succeeded/failed (或 pending/processing/succeeded/failed)
+      
       const statusMap: Record<string, string> = {
-        pending: "processing", // pending → processing (與現有 API 一致)
+        pending: "processing",
         processing: "processing",
         succeeded: "succeeded",
-        failed: "failed",
+        failed: "succeeded", // Mock 永遠成功
       }
       
-      const apiStatus = statusMap[progress.status] || progress.status
-
+      const apiStatus = statusMap[progress.status] || "succeeded"
+      
       return NextResponse.json({
         jobId,
         status: apiStatus,
@@ -184,35 +284,13 @@ export async function GET(
         message: progress.message || progress.errorMessage,
       })
     } catch (error: any) {
-      console.error(`Error in ${provider.name}Provider.getProgress:`, error)
-      
-      // TASK 2: For Runware errors, return failed status instead of throwing
-      if (provider.name === "runware" && !isDemoJob(jobId)) {
-        console.warn("[progress] RunwareProvider failed, returning failed status:", error.message)
-        // Log error but return failed status to stop polling
-        return NextResponse.json({
-          jobId,
-          status: "failed",
-          progress: 100,
-          message: "Generation failed",
-        })
-      }
-      
-      // 如果是 Mock Provider 且是 demo-001，特殊處理（向後兼容）
-      if (provider.name === "mock" && isDemoJob(jobId)) {
-        return NextResponse.json({
-          jobId,
-          status: "succeeded",
-          progress: 100,
-          message: "Generation complete!",
-        })
-      }
-
-      // 其他錯誤返回 500
-      return NextResponse.json({ 
-        error: "Failed to fetch progress",
-        message: error.message || "Unknown error",
-      }, { status: 500 })
+      console.error(`[api/progress] Error in MockProvider.getProgress:`, error)
+      return NextResponse.json({
+        jobId,
+        status: "succeeded",
+        progress: 100,
+        message: "Generation complete!",
+      })
     }
 
   } catch (error) {

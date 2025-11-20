@@ -75,6 +75,41 @@ export const isRunwareMock = runwareMode === "mock"
 export const isRunwareReal = runwareMode === "real"
 
 // ============================================
+// Runware Enabled Helper (R5)
+// ============================================
+
+/**
+ * R5: Unified helper to check if Runware is enabled
+ * 
+ * Checks both server-side (RUNWARE_ENABLED) and client-side (NEXT_PUBLIC_RUNWARE_ENABLED) flags.
+ * Both must be "true" for Runware to be enabled.
+ * 
+ * @returns true if Runware is enabled, false otherwise
+ */
+export function isRunwareEnabled(): boolean {
+  const serverEnabled = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
+  const clientEnabled = process.env.NEXT_PUBLIC_RUNWARE_ENABLED === "true"
+  
+  // Both must be true for Runware to be enabled
+  return serverEnabled && clientEnabled
+}
+
+/**
+ * R5: Get Runware enabled status for logging/debugging
+ * 
+ * @returns Object with server and client enabled flags
+ */
+export function getRunwareEnabledStatus() {
+  return {
+    serverEnabled: process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0",
+    clientEnabled: process.env.NEXT_PUBLIC_RUNWARE_ENABLED === "true",
+    envRunwareEnabled: process.env.RUNWARE_ENABLED,
+    envNextPublicRunwareEnabled: process.env.NEXT_PUBLIC_RUNWARE_ENABLED,
+    isEnabled: isRunwareEnabled(),
+  }
+}
+
+// ============================================
 // PayPal Mode
 // ============================================
 

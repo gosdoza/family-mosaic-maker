@@ -8,7 +8,7 @@
 import { GenerationProvider } from "./providers/base"
 import { createMockProvider } from "./providers/mock"
 import { createRunwareProvider } from "./providers/runware"
-import { runwareMode } from "@/lib/featureFlags"
+import { runwareMode, isRunwareEnabled } from "@/lib/featureFlags"
 
 export type ProviderType = "mock" | "runware" | "fal"
 
@@ -25,18 +25,18 @@ export function getGenerationProvider(): GenerationProvider {
   const envProvider = process.env.GENERATION_PROVIDER?.toLowerCase()
   const useMockFlag = process.env.NEXT_PUBLIC_USE_MOCK === "true"
   
-  // 總開關檢查：如果 RUNWARE_ENABLED=false，強制使用 mock
-  const runwareEnabledFlag = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
+  // R5: 使用統一的 helper 檢查 Runware 是否啟用
+  const runwareEnabled = isRunwareEnabled()
   
   // RUNWARE-NOTE: Use feature flags for provider selection
-  // Priority: RUNWARE_ENABLED → GENERATION_PROVIDER → runwareMode → NEXT_PUBLIC_USE_MOCK → default mock
+  // Priority: isRunwareEnabled() → GENERATION_PROVIDER → runwareMode → NEXT_PUBLIC_USE_MOCK → default mock
   let provider: ProviderType = "mock"
   
   if (envProvider === "mock" || envProvider === "fal") {
     provider = envProvider
-  } else if (envProvider === "runware" && runwareEnabledFlag) {
+  } else if (envProvider === "runware" && runwareEnabled) {
     provider = "runware"
-  } else if (runwareMode === "real" && runwareEnabledFlag) {
+  } else if (runwareMode === "real" && runwareEnabled) {
     provider = "runware"
   } else if (useMockFlag) {
     provider = "mock"
@@ -77,19 +77,19 @@ export function getProviderType(): ProviderType {
   const envProvider = process.env.GENERATION_PROVIDER?.toLowerCase()
   const useMockFlag = process.env.NEXT_PUBLIC_USE_MOCK === "true"
   
-  // 總開關檢查：如果 RUNWARE_ENABLED=false，強制返回 mock
-  const runwareEnabledFlag = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
+  // R5: 使用統一的 helper 檢查 Runware 是否啟用
+  const runwareEnabled = isRunwareEnabled()
   
   if (envProvider === "mock" || envProvider === "fal") {
     return envProvider
   }
   
-  if (envProvider === "runware" && runwareEnabledFlag) {
+  if (envProvider === "runware" && runwareEnabled) {
     return "runware"
   }
   
   // RUNWARE-NOTE: Use feature flags
-  if (runwareMode === "real" && runwareEnabledFlag) {
+  if (runwareMode === "real" && runwareEnabled) {
     return "runware"
   }
   

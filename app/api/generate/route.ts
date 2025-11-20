@@ -34,6 +34,11 @@ import { isPreviewEnv, runwareMode } from "@/lib/featureFlags"
  */
 export async function POST(request: NextRequest) {
   const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+  
+  // 二、修正 finalProviderName is not defined：在 POST handler 開頭宣告變數
+  // 整個 POST 可見，避免 ReferenceError
+  let finalProviderName: string | null = null
+  
   let user: { id: string } | null = null
   
   try {
@@ -158,7 +163,7 @@ export async function POST(request: NextRequest) {
     let style: string = ""
     let template: string = ""
     let useReal: boolean = false // TASK 1: Per-request flag for real AI
-    
+
     const contentType = request.headers.get("content-type") || ""
     if (contentType.includes("multipart/form-data")) {
       try {
@@ -219,18 +224,27 @@ export async function POST(request: NextRequest) {
     // Route B: Real Runware API integration with fallback to mock
     // Priority: useReal checkbox → runware (if enabled), else → mock
     
+    // 二、修正 finalProviderName is not defined：已在 POST handler 開頭宣告（第 38 行），這裡不需要重複宣告
+    
+    // R5: 使用統一的 helper 檢查 Runware 是否啟用
+    const { isRunwareEnabled, getRunwareEnabledStatus } = await import("@/lib/featureFlags")
+    const runwareEnabledStatus = getRunwareEnabledStatus()
+    const runwareEnabled = isRunwareEnabled()
+    
     // Check if Runware is enabled and template/style is supported
     const isRunwareSupported = template === "christmas" && style === "realistic"
-    // 總開關檢查：RUNWARE_ENABLED 必須為 true 才能使用 Runware
-    const runwareEnabledFlag = process.env.RUNWARE_ENABLED !== "false" && process.env.RUNWARE_ENABLED !== "0"
     
-    // 修復：Provider decision 邏輯
-    // - 如果 useReal === true 且 RUNWARE_ENABLED === true 且 template/style 支援 → 使用 Runware
-    // - 否則 → 使用 Mock
-    // 不再依賴 runwareMode，直接根據 useReal checkbox 和 RUNWARE_ENABLED 決定
-    let finalProviderName: "mock" | "runware" = "mock"
+    // R5: 保護機制：如果 RUNWARE_ENABLED=false 或 NEXT_PUBLIC_RUNWARE_ENABLED=false 但勾了 checkbox
+    // → 仍然強制走 mock，並在 server log 提醒
+    finalProviderName = "mock" // Step 3: Initialize to default value
+    let forceMockReason: string | null = null
     
-    if (useReal && runwareEnabledFlag && isRunwareSupported) {
+    if (useReal && !runwareEnabled) {
+      // R5: 保護機制：checkbox 勾了但 Runware 未啟用
+      forceMockReason = `Runware disabled (serverEnabled: ${runwareEnabledStatus.serverEnabled}, clientEnabled: ${runwareEnabledStatus.clientEnabled}), force mock`
+      console.warn(`[api/generate] R5: ${forceMockReason}`)
+      finalProviderName = "mock"
+    } else if (useReal && runwareEnabled && isRunwareSupported) {
       // 使用者勾選了 checkbox，且 Runware 已啟用，且 template/style 支援 → 使用 Runware
       finalProviderName = "runware"
       try {
@@ -240,47 +254,102 @@ export async function POST(request: NextRequest) {
         // 如果 RunwareProvider 創建失敗（例如缺少 API key），fallback 到 mock
         console.warn("[api/generate] Failed to create RunwareProvider, falling back to mock:", error)
         finalProviderName = "mock"
+        forceMockReason = "RunwareProvider creation failed"
         const { createMockProvider } = await import("@/lib/generation/providers/mock")
         provider = createMockProvider()
       }
     } else {
       // 使用 Mock Provider
       finalProviderName = "mock"
+      if (!useReal) {
+        forceMockReason = "useReal checkbox not checked"
+      } else if (!isRunwareSupported) {
+        forceMockReason = `Template/style not supported (template: ${template}, style: ${style})`
+      }
       if (provider.name !== "mock") {
         const { createMockProvider } = await import("@/lib/generation/providers/mock")
         provider = createMockProvider()
       }
     }
     
-    // 修復：isRunwareEnabled 應該基於最終決定的 provider
-    const isRunwareEnabled = finalProviderName === "runware" && runwareEnabledFlag && useReal && isRunwareSupported
-    
-    // Log provider decision (dev only)
-    if (process.env.NODE_ENV !== "production") {
-      console.log("[api/generate] provider decision", {
-        providerName: finalProviderName,
-        useRealFromRequest: useReal,
-        runwareEnabledFlag,
-        isRunwareSupported,
-        isRunwareEnabled,
-        template,
-        style,
-        envRunwareEnabled: process.env.RUNWARE_ENABLED,
-        envNextPublicRunwareEnabled: process.env.NEXT_PUBLIC_RUNWARE_ENABLED,
-      })
-    }
+    // R5: 統一日誌格式
+    console.log("[api/generate] provider decision", {
+      providerName: finalProviderName,
+      template,
+      style,
+      useRealFromRequest: useReal,
+      envRunwareEnabled: runwareEnabledStatus.envRunwareEnabled,
+      envNextPublicRunwareEnabled: runwareEnabledStatus.envNextPublicRunwareEnabled,
+      runwareEnabled: runwareEnabledStatus.isEnabled,
+      isRunwareSupported,
+      forceMockReason,
+    })
     
     // Track if we attempted Runware (for isFallback calculation)
     let attemptedRunware = false
     
-    // Try Runware first if enabled and supported
-    if (isRunwareEnabled) {
+    // R5: Try Runware first if enabled and supported (use finalProviderName instead of isRunwareEnabled)
+    if (finalProviderName === "runware" && runwareEnabled && isRunwareSupported) {
       attemptedRunware = true
       try {
-        const fileUrls = await getFileUrls(files, user.id)
+        // CHECKPOINT B: 準備調用 getFileUrls (Runware flow)
+        console.log("### CHECKPOINT B - about to call getFileUrls (Runware flow)", {
+          filesCount: files.length,
+          userId: user.id,
+        })
+        
+      const fileUrls = await getFileUrls(files, user.id)
+
+        // CHECKPOINT C: getFileUrls 返回結果 (Runware flow)
+        console.log("### CHECKPOINT C - got fileUrls (Runware flow)", {
+          count: fileUrls.length,
+          firstUrlPreview: fileUrls.length > 0 ? fileUrls[0].substring(0, 60) + "..." : "none",
+        })
+
+        // Task B1-2: Determine if we should use Identity Flow
+        // 暫時採用簡單規則：使用者只上傳一張圖 → 視為 identity + 同時也是 content
+        const useIdentityFlow = fileUrls.length === 1 && useReal
+        
+        // Task B1-2: Log runware mode with identity flag
+        console.log("[api/generate] runware mode", {
+          request_id: requestId,
+          useRealFromRequest: useReal,
+          identityMode: useIdentityFlow,
+          template,
+          style,
+          fileCount: fileUrls.length,
+        })
+        
         // 將 userId 傳入 payload（provider 可能需要）
         const payload = { files: fileUrls, style, template, userId: user.id, requestId }
-        const { jobId } = await provider.generate(payload)
+        
+        // Task B1-2: Call RunwareProvider.generate() with identity flow option
+        let result: GenerateResult
+        try {
+          if (useIdentityFlow) {
+            // Try identity flow first
+            result = await provider.generate(payload, { useIdentityFlow: true })
+          } else {
+            // Normal imageInference flow
+            result = await provider.generate(payload)
+          }
+        } catch (identityError: any) {
+          // Task B1-2: If identity flow fails, fallback to normal imageInference
+          if (useIdentityFlow) {
+            console.warn("[api/generate] B1-2: identity flow failed, falling back to normal imageInference", {
+              error: identityError.message,
+              errorName: identityError.name,
+            })
+            // Fallback to normal flow
+            result = await provider.generate(payload, { useIdentityFlow: false })
+      } else {
+            throw identityError
+          }
+        }
+        
+        const { jobId } = result
+        // Task B1-3: Extract identityMode from result if available
+        const identityMode = (result as any).identityMode || false
         
         // 记录 gen_ok 事件（Runware 模式）
         await logAnalyticsEvent({
@@ -294,6 +363,7 @@ export async function POST(request: NextRequest) {
             model_id: null,
             template,
             style,
+            identityMode, // Task B1-3: Include identityMode in analytics
           },
         })
 
@@ -303,12 +373,16 @@ export async function POST(request: NextRequest) {
           request_id: requestId,
           provider: "runware",
           isFallback: false,
+          identityMode, // Task B1-3: Include identityMode in response
         })
       } catch (error: any) {
+        // 四、確保 Runware 失敗時可以安全 fallback 到 mock
+        // Step 3: Update finalProviderName to mock when fallback occurs
+        finalProviderName = "mock"
+        
         // 如果錯誤是 RUNWARE_DISABLED，直接 fallback 到 mock，不要重試 Runware
         if (error?.message === "RUNWARE_DISABLED" || error?.name === "RunwareDisabledError") {
           console.log("[api/generate] RUNWARE_DISABLED, fallback to mock provider")
-          // Fall through to mock provider below
         } else {
           // RUNWARE-NOTE: If RunwareProvider fails, fallback to mock
           console.error("[api/generate] RunwareProvider failed, falling back to mock:", {
@@ -334,7 +408,70 @@ export async function POST(request: NextRequest) {
           })
         }
         
-        // Fall through to mock provider below
+        // 四、確保 Runware 失敗時可以安全 fallback 到 mock：確實呼叫 mock provider，回傳 200
+        // 不要在這裡 throw，而是確實呼叫 mock provider
+        try {
+          // 確保使用 mock provider
+          if (provider.name !== "mock") {
+            const { createMockProvider } = await import("@/lib/generation/providers/mock")
+            provider = createMockProvider()
+          }
+          
+          // CHECKPOINT D: 準備調用 getFileUrls (Mock fallback)
+          console.log("### CHECKPOINT D - about to call getFileUrls (Mock fallback)", {
+            filesCount: files.length,
+            userId: user.id,
+          })
+          
+          const fileUrls = await getFileUrls(files, user.id)
+          
+          // CHECKPOINT E: getFileUrls 返回結果 (Mock fallback)
+          console.log("### CHECKPOINT E - got fileUrls (Mock fallback)", {
+            count: fileUrls.length,
+            firstUrlPreview: fileUrls.length > 0 ? fileUrls[0].substring(0, 60) + "..." : "none",
+          })
+          
+          const mockResult = await provider.generate({ files: fileUrls, style, template })
+          
+          if (!mockResult.ok || !mockResult.jobId) {
+            throw new Error("Mock provider.generate() returned invalid result")
+          }
+          
+          // 记录 gen_ok 事件（Mock fallback 模式）
+        await logAnalyticsEvent({
+            event_type: "gen_ok",
+          request_id: requestId,
+          user_id: user.id,
+          data: {
+              job_id: mockResult.jobId,
+              mode: "mock",
+              model_provider: "mock",
+              model_id: null,
+              template,
+              style,
+              fallback_reason: "runware_failed",
+              is_fallback: true,
+            },
+          })
+          
+          // 回傳 200 + mock 結果，而不是 500
+          return NextResponse.json({
+            ok: true,
+            jobId: mockResult.jobId,
+            request_id: requestId,
+            provider: "mock",
+            isFallback: true,
+          })
+        } catch (mockError: any) {
+          // 如果 mock 真的也失敗，才 throw 讓最外層 catch 處理
+          console.error("[api/generate] Mock provider.generate() failed after Runware fallback:", {
+            request_id: requestId,
+            provider: provider.name,
+            error: mockError.message,
+            stack: mockError.stack,
+          })
+          throw mockError // 這裡才會掉到最外層 catch
+        }
       }
     }
 
@@ -400,9 +537,10 @@ export async function POST(request: NextRequest) {
     
     // Enhanced error logging: Always log request_id, provider name, and error details
     // This helps correlate errors with the JSON response
+    // Step 3: Safely reference finalProviderName (may be null if error occurs early)
     console.error("[api/generate] Error caught in outer try-catch:", {
       request_id: requestId,
-      provider: finalProviderName || "unknown",
+      provider: finalProviderName ?? "unknown",
       useRealFromRequest: useReal,
       error_name: error.name || "Error",
       error_message: error.message || "Unknown error",
@@ -427,7 +565,7 @@ export async function POST(request: NextRequest) {
         message: error.message || "Unknown error",
         status: error.status,
         code: error.code,
-        provider: finalProviderName || "unknown",
+        provider: finalProviderName ?? "unknown", // Step 3: Use nullish coalescing
         useReal,
       },
     })
@@ -447,7 +585,7 @@ export async function POST(request: NextRequest) {
     if (isDev) {
       basePayload.debug = {
         source: error.name === "RunwareGenerateError" ? "runware" : 
-                finalProviderName === "mock" ? "mock" : "unknown",
+                (finalProviderName === "mock" ? "mock" : "unknown"), // Step 3: Safe comparison
         code: error.code || "INTERNAL_ERROR",
         name: error.name || "Error",
         message: error.message || "Unknown error",
@@ -469,15 +607,100 @@ export async function POST(request: NextRequest) {
 
 /**
  * 获取文件 URL（从 Supabase Storage）
+ * 
+ * 1) Identity Flow must receive a REAL Supabase public URL:
+ * - Upload the received image (from FormData) into Supabase Storage
+ * - Generate a valid public URL from the real project bucket
+ * - Pass that public URL into runRunwareImageUpload()
  */
 async function getFileUrls(files: File[], userId: string): Promise<string[]> {
+  // CHECKPOINT A: 驗證 getFileUrls 是否真的被執行
+  console.log("### CHECKPOINT A - getFileUrls reached", {
+    filesCount: files.length,
+    userId,
+    firstFileType: files.length > 0 ? typeof files[0] : "none",
+  })
+  
   // 如果 files 已经是 URL 字符串数组，直接返回
   if (files.length > 0 && typeof files[0] === "string") {
+    console.log("### CHECKPOINT A - getFileUrls: files already URLs, returning early")
     return files as unknown as string[]
   }
   
-  // 这里返回占位符 URL（实际应从 Supabase Storage 获取签名 URL）
-  return (files as File[]).map((file) => `https://storage.example.com/${userId}/${file.name}`)
+  // 1) Identity Flow: Upload files to Supabase Storage and get public URLs
+  const serviceClient = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  )
+  
+  const publicUrls: string[] = []
+  
+  for (const file of files as File[]) {
+    try {
+      // Upload file to Supabase Storage (originals bucket)
+      const filePath = `${userId}/${Date.now()}_${file.name}`
+      const arrayBuffer = await file.arrayBuffer()
+      const buffer = Buffer.from(arrayBuffer)
+      
+      const { error: uploadError } = await serviceClient.storage
+        .from("originals")
+        .upload(filePath, buffer, {
+          contentType: file.type,
+          upsert: false,
+        })
+      
+      if (uploadError) {
+        console.error("[api/generate] Failed to upload file to Supabase Storage:", {
+          file: file.name,
+          error: uploadError.message,
+        })
+        throw new Error(`Failed to upload file ${file.name}: ${uploadError.message}`)
+      }
+      
+      // Get public URL using getPublicUrl()
+      const { data: publicUrlData } = serviceClient.storage
+        .from("originals")
+        .getPublicUrl(filePath)
+      
+      if (!publicUrlData?.publicUrl) {
+        throw new Error(`Failed to get public URL for ${file.name}`)
+      }
+      
+      // T3 Hotfix: 確保完整 URL 被保留，只在 log 中截斷
+      const fullPublicUrl = publicUrlData.publicUrl
+      publicUrls.push(fullPublicUrl)
+      
+      // DEBUG: Print full URL without shortening
+      console.log("[DEBUG FULL PUBLIC URL] ", fullPublicUrl)
+      
+      // Log 中使用截斷版本，但實際傳遞的是完整 URL
+      const shortPublicUrl = fullPublicUrl.length > 100 
+        ? fullPublicUrl.substring(0, 100) + "..." 
+        : fullPublicUrl
+      
+      console.log("[api/generate] File uploaded to Supabase Storage and got public URL", {
+        file: file.name,
+        filePath,
+        publicUrl: shortPublicUrl,
+        publicUrlLength: fullPublicUrl.length,
+        publicUrlStartsWith: fullPublicUrl.substring(0, 60),
+      })
+    } catch (error: any) {
+      console.error("[api/generate] Error uploading file to Supabase Storage:", {
+        file: file.name,
+        error: error.message,
+      })
+      throw error
+    }
+  }
+  
+  return publicUrls
 }
 
 /**

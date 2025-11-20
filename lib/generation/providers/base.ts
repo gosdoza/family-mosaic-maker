@@ -49,8 +49,10 @@ export interface GenerationProvider {
   
   /**
    * 創建生成任務
+   * @param input - Generation request payload
+   * @param options - Optional generation options (e.g., useIdentityFlow for Runware)
    */
-  generate(input: GenerateRequestPayload): Promise<GenerateResult>
+  generate(input: GenerateRequestPayload, options?: { useIdentityFlow?: boolean }): Promise<GenerateResult>
 
   /**
    * 查詢任務進度

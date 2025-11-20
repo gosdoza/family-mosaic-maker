@@ -10,10 +10,102 @@ import { isDemoJob } from "@/lib/featureFlags"
 /**
  * Results API Route
  * 
- * Mock Job 規則：
- * - jobId 以 "job_" 開頭 → Mock job，直接返回固定 mock 圖片，不查詢 Supabase，不調用 Runware API
- * - 其他 jobId → 可能是 Runware job，走正常的 provider 流程（查 Supabase，可能需要同步 Runware）
+ * 分支邏輯：
+ * 1. jobId 以 "job_" 開頭 → Mock job，返回固定 mock 圖片
+ * 2. jobId 以 "rw_" 開頭 → Runware job，完全依賴 Supabase DB（不再調用 Runware API）
+ * 3. 其他 jobId → 走現有邏輯（向後兼容）
  */
+
+/**
+ * Helper: 從 Supabase DB 查詢 Runware job 的圖片
+ */
+async function fetchRunwareJobImages(jobId: string): Promise<{
+  images: Array<{ id: number; url: string; thumbnail: string }>
+  paymentStatus: "paid" | "unpaid" | "free"
+  createdAt: string
+  identityMode?: boolean
+}> {
+  const serviceClient = createServiceClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  )
+
+  // 查詢 job_images 表
+  const { data: jobImages, error: imagesError } = await serviceClient
+    .from("job_images")
+    .select("id, image_url, thumbnail_url, created_at")
+    .eq("job_id", jobId)
+    .order("created_at", { ascending: true })
+
+  if (imagesError) {
+    console.error(`[api/results] Error fetching job_images for job ${jobId}:`, {
+      error: imagesError.message,
+      code: imagesError.code,
+      details: imagesError.details,
+    })
+    throw new Error(`Failed to fetch job images: ${imagesError.message}`)
+  }
+
+  if (!jobImages || jobImages.length === 0) {
+    console.warn(`[api/results] Runware job ${jobId} has no corresponding job_images records in database`)
+    return {
+      images: [],
+      paymentStatus: "free",
+      createdAt: new Date().toISOString(),
+      identityMode: false,
+    }
+  }
+
+  // 格式化圖片陣列（使用正確的欄位名稱：image_url, thumbnail_url）
+  const images = jobImages.map((img, idx) => ({
+    id: idx + 1,
+    url: img.image_url, // 使用 image_url 欄位
+    thumbnail: img.thumbnail_url ?? img.image_url, // thumbnail_url 為 null 時 fallback 到 image_url
+  }))
+
+  // 查詢 job 的 created_at 和支付狀態
+  const { data: jobData, error: jobError } = await serviceClient
+    .from("jobs")
+    .select("created_at, status")
+    .eq("job_id", jobId)
+    .single()
+
+  if (jobError) {
+    console.warn(`[api/results] Error fetching job data for ${jobId}:`, jobError.message)
+  }
+
+  // 查詢支付狀態（從 orders 表）
+  let paymentStatus: "paid" | "unpaid" | "free" = "free"
+  try {
+    const { data: orders } = await serviceClient
+      .from("orders")
+      .select("payment_status, status")
+      .eq("job_id", jobId)
+      .limit(1)
+
+    if (orders && orders.length > 0) {
+      const order = orders[0]
+      paymentStatus = order.payment_status === "paid" || order.status === "paid" ? "paid" : "unpaid"
+    }
+  } catch (orderError: any) {
+    console.warn(`[api/results] Error fetching order status for job ${jobId}:`, orderError.message)
+    // 默認為 free
+  }
+
+  return {
+    images,
+    paymentStatus,
+    createdAt: jobData?.created_at || jobImages[0]?.created_at || new Date().toISOString(),
+    identityMode: false, // TODO: 如果未來需要，可以從 DB metadata 或 jobs 表查詢
+  }
+}
+
 export async function GET(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> | { id: string } }
@@ -27,12 +119,15 @@ export async function GET(
       return NextResponse.json({ error: "Job ID is required" }, { status: 400 })
     }
 
-    // Mock Job 判斷：jobId 以 "job_" 開頭 → 直接返回固定 mock 圖片，不查詢 Supabase，不調用 Runware
+    const requestUrl = new URL(request.url)
+    const paidParam = requestUrl.searchParams.get("paid")
+    const isPaidFromQuery = paidParam === "1" || paidParam === "true"
+
+    // ============================================================================
+    // 1. Mock Job: jobId 以 "job_" 開頭
+    // ============================================================================
     if (jobId.startsWith("job_")) {
-      console.log("[api/results] Mock job detected (job_ prefix), returning mock images without Supabase/Runware calls", { jobId })
-      const requestUrl = new URL(request.url)
-      const paidParam = requestUrl.searchParams.get("paid")
-      const isPaid = paidParam === "1" || paidParam === "true"
+      console.log("[api/results] Mock job detected (job_ prefix), returning mock images", { jobId })
       
       return NextResponse.json({
         ok: true,
@@ -42,69 +137,124 @@ export async function GET(
           { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
           { id: 3, url: "/assets/mock/family3.jpg", thumbnail: "/assets/mock/family3.jpg" },
         ],
-        paymentStatus: isPaid ? "paid" : "unpaid",
+        paymentStatus: isPaidFromQuery ? "paid" : "unpaid",
         createdAt: new Date().toISOString(),
         provider: "mock",
         isMock: true,
       })
     }
 
-    // Route A: demo-001 固定返回 mock 图片，跳过登录验证（全 mock demo flow）
-    // Route C: 根据 query string paid=1 返回 paid 状态
-    // NOTE: behavior preserved, just using centralized feature flags
-    if (isDemoJob(jobId)) {
-      const requestUrl = new URL(request.url)
-      const paidParam = requestUrl.searchParams.get("paid")
-      const isPaid = paidParam === "1" || paidParam === "true"
+    // ============================================================================
+    // 2. Runware Job: jobId 以 "rw_" 開頭
+    // 完全依賴 Supabase DB，不再調用 Runware API
+    // ============================================================================
+    if (jobId.startsWith("rw_")) {
+      console.log(`[api/results] Runware job detected (rw_ prefix), fetching from Supabase DB for job ${jobId}`)
       
+      try {
+        const result = await fetchRunwareJobImages(jobId)
+        
+        // 如果 query string 有 paid=1，優先使用 query 參數
+        const paymentStatus = isPaidFromQuery ? "paid" : result.paymentStatus
+
+        // 記錄 analytics 事件
+        try {
+          const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
+          await logAnalyticsEvent({
+            event_type: "results_ok",
+            request_id: requestId,
+            job_id: jobId,
+            user_id: null,
+            data: {
+              image_count: result.images.length,
+              model_provider: "runware",
+              model_id: null,
+              payment_status: paymentStatus,
+            },
+          })
+        } catch (analyticsError) {
+          // Analytics 失敗不影響主流程
+          console.warn(`[api/results] Failed to log analytics for job ${jobId}:`, analyticsError)
+        }
+
+        return NextResponse.json({
+          ok: true,
+          jobId,
+          images: result.images,
+          paymentStatus,
+          createdAt: result.createdAt,
+          provider: "runware",
+          isMock: false,
+          identityMode: result.identityMode,
+        })
+      } catch (error: any) {
+        // 錯誤處理：記錄詳細錯誤並返回 500
+        console.error(`[api/results] Error fetching Runware job results for ${jobId}:`, {
+          error: error.message,
+          stack: error.stack,
+          jobId,
+        })
+        
+        return NextResponse.json(
+          {
+            ok: false,
+            error: "Failed to fetch job results",
+            jobId,
+          },
+          { status: 500 }
+        )
+      }
+    }
+
+    // ============================================================================
+    // 3. Demo Job: demo-001（保持現有行為）
+    // ============================================================================
+    if (isDemoJob(jobId)) {
       return NextResponse.json({
+        ok: true,
         jobId,
         images: [
           { id: 1, url: "/assets/mock/family1.jpg", thumbnail: "/assets/mock/family1.jpg" },
           { id: 2, url: "/assets/mock/family2.jpg", thumbnail: "/assets/mock/family2.jpg" },
         ],
-        paymentStatus: isPaid ? "paid" : "unpaid",
+        paymentStatus: isPaidFromQuery ? "paid" : "unpaid",
         createdAt: new Date().toISOString(),
+        provider: "mock",
+        isMock: true,
       })
     }
 
-    // Route B: Use provider system (Mock or Runware)
-    // 注意：Mock job（job_ 開頭）已在上面處理，這裡不會進入
-    // 這裡處理的是真正的 Runware job（非 job_ 開頭，且不是 demo-001）
-    
-    // Check if job is from Runware (non-demo job) and runwareMode is enabled
+    // ============================================================================
+    // 4. 其他 jobId：向後兼容的現有邏輯
+    // ============================================================================
+    // 這裡保留原有的複雜邏輯（e2eStore, MockProvider, RunwareProvider 等）
+    // 以確保向後兼容性
+
     const { runwareMode, isPreviewEnv } = await import("@/lib/featureFlags")
     const isRunwareJob = !isDemoJob(jobId) && runwareMode === "real"
     const providerType = getProviderType()
     const useMock = providerType === "mock" || isPreviewEnv
 
-    // If it's a Runware job, try to use RunwareProvider
-    // 只有真正的 Runware job 才會走到這裡（查 Supabase，可能需要同步 Runware）
+    // 如果確定是 Runware job 且不在 mock 模式，嘗試使用 RunwareProvider
     if (isRunwareJob && !useMock) {
       try {
         const { createRunwareProvider } = await import("@/lib/generation/providers/runware")
         const runwareProvider = createRunwareProvider()
         
-        const requestUrl = new URL(request.url)
-        const paidParam = requestUrl.searchParams.get("paid")
-        const isPaid = paidParam === "1" || paidParam === "true"
+        const results = await runwareProvider.getResults(jobId, { paid: isPaidFromQuery })
         
-        const results = await runwareProvider.getResults(jobId, { paid: isPaid })
-        
-        // Normalize results format to match existing API response
         const normalizedImages = results.images.map((url, idx) => ({
           id: idx + 1,
           url,
-          thumbnail: url, // Runware may not have thumbnails, use full URL
+          thumbnail: url,
         }))
-        
-        // Log results_ok event
+
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
         await logAnalyticsEvent({
           event_type: "results_ok",
           request_id: requestId,
           job_id: jobId,
-          user_id: null, // TODO: get user from auth if needed
+          user_id: null,
           data: {
             image_count: normalizedImages.length,
             model_provider: "runware",
@@ -112,60 +262,46 @@ export async function GET(
             payment_status: results.paymentStatus,
           },
         })
-        
+
         return NextResponse.json({
+          ok: true,
           jobId,
           images: normalizedImages,
           paymentStatus: results.paymentStatus || "unpaid",
           createdAt: new Date().toISOString(),
+          provider: "runware",
+          isMock: false,
         })
       } catch (error: any) {
-        console.error("[results] RunwareProvider failed, falling back to mock:", error)
+        console.error("[api/results] RunwareProvider.getResults failed:", error)
         // Fall through to mock provider below
       }
     }
 
+    // Mock 模式或 fallback：使用 e2eStore 和 MockProvider
     if (useMock || !isRunwareJob) {
-      // Mock 模式：嘗試使用 MockProvider，但保留現有邏輯作為 fallback
-      // 因為 results API 有複雜的支付狀態、品質分數等邏輯
-      // 暫時保留現有實作，確保行為一致
-      // Check e2e store for job
       const job = e2eStore.jobs.get(jobId)
-      
-      // 生成 Mock 预览图
       const mockPreviewUrls = generateMockPreviewUrls(3)
       const mockImages = mockPreviewUrls.map((url, idx) => ({
-        id: idx,
+        id: idx + 1,
         url,
         thumbnail: url,
       }))
 
       if (!job) {
-        // Fallback to mock results data for testing
-        // Check for paid order even if job doesn't exist in store
-        // 特殊處理：demo-001 支援 paid=1 query（用於 QA 測試）
-        const requestUrl = new URL(request.url)
-        const paidParam = requestUrl.searchParams.get("paid")
-        const paidFromQuery = paidParam === "1" || paidParam === "true"
-        
-        const paid = paidFromQuery || [...e2eStore.orders.values()].some(
+        const paid = isPaidFromQuery || [...e2eStore.orders.values()].some(
           (o) => o.job_id === jobId && o.status === "paid"
         )
 
-        // 计算品质分数并检查是否需要发放重生成券
         const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
         const qualityScores = calculateQualityScores(forceLowQuality)
         const needsVoucher = shouldIssueVoucher(qualityScores)
 
-        // 获取用户 ID（如果已登录）
         const supabase = await createClient()
         const { data: { user } } = await supabase.auth.getUser()
 
         if (needsVoucher && user) {
-          // 发放重生成券
           const voucher = generateVoucher(jobId, user.id)
-          
-          // 记录到 analytics_logs（先不建表，用 analytics_logs 记录）
           await logAnalyticsEvent({
             event_type: "voucher_issued",
             job_id: jobId,
@@ -179,7 +315,6 @@ export async function GET(
           })
         }
 
-        // 记录 results_ok 事件
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
         const falApiKey = process.env.FAL_API_KEY
         const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
@@ -200,7 +335,6 @@ export async function GET(
           },
         })
 
-        // 记录 preview_view 事件
         await logAnalyticsEvent({
           event_type: "preview_view",
           request_id: requestId,
@@ -214,6 +348,7 @@ export async function GET(
         })
 
         return NextResponse.json({
+          ok: true,
           jobId,
           images: mockImages,
           paymentStatus: paid ? "paid" : "unpaid",
@@ -223,30 +358,20 @@ export async function GET(
         })
       }
 
-      // Check for paid order: 只要 e2eStore 中有該 job 的訂單且為 paid，就判定已付
-      const paid = [...e2eStore.orders.values()].some(
+      // Job exists in e2eStore
+      const paid = isPaidFromQuery || [...e2eStore.orders.values()].some(
         (o) => o.job_id === jobId && o.status === "paid"
       )
 
-      // Debug log in development
-      if (process.env.NODE_ENV !== "production") {
-        console.log(`[Results API] Job ${jobId}: paymentStatus=${paid ? "paid" : "unpaid"}, orders=${e2eStore.orders.size}`)
-      }
-
-      // 计算品质分数
       const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
       const qualityScores = calculateQualityScores(forceLowQuality)
       const needsVoucher = shouldIssueVoucher(qualityScores)
 
-      // 获取用户 ID
       const supabase = await createClient()
       const { data: { user } } = await supabase.auth.getUser()
 
       if (needsVoucher && user) {
-        // 发放重生成券
         const voucher = generateVoucher(jobId, user.id)
-        
-        // 记录到 analytics_logs
         await logAnalyticsEvent({
           event_type: "voucher_issued",
           job_id: jobId,
@@ -260,7 +385,6 @@ export async function GET(
         })
       }
 
-        // 记录 results_ok 事件
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
         const falApiKey = process.env.FAL_API_KEY
         const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
@@ -281,7 +405,6 @@ export async function GET(
           },
         })
 
-      // 记录 preview_view 事件
       await logAnalyticsEvent({
         event_type: "preview_view",
         request_id: requestId,
@@ -294,54 +417,45 @@ export async function GET(
         },
       })
 
-      // 處理 result_urls（可能是 string[] 或複雜物件）
-      const imageUrls = (job.result_urls || []).map((url: any) => 
+      const imageUrls = (job.result_urls || []).map((url: any) =>
         typeof url === "string" ? url : url.url || url
       )
       const finalImages = imageUrls.length > 0 ? imageUrls : mockImages.map(img => img.url)
 
       return NextResponse.json({
+        ok: true,
         jobId,
         images: finalImages.map((url, idx) => ({
-          id: idx,
+          id: idx + 1,
           url,
           thumbnail: url,
         })),
         paymentStatus: paid ? "paid" : "unpaid",
-        createdAt: new Date().toISOString(), // E2EJob 沒有 created_at 欄位
+        createdAt: new Date().toISOString(),
         qualityScores,
         voucherIssued: needsVoucher,
       })
     }
 
-    // 使用 Provider 系統（Mock 或 Runware）
+    // 最後的 fallback：使用 Provider 系統
     const provider = getGenerationProvider()
-    
-    // 如果是 Mock Provider，保留現有邏輯（因為有複雜的支付狀態、品質分數等）
-    if (provider.name === "mock") {
-      // Mock 邏輯已在上面處理，這裡不需要額外處理
-    } else if (provider.name === "runware") {
-      // Runware Provider
-      // Get current user
-      const supabase = await createClient()
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+    const supabase = await createClient()
+    const { data: { user } } = await supabase.auth.getUser()
 
-      if (!user) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-      }
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
+    }
 
+    if (provider.name === "runware") {
       try {
-        // 檢查支付狀態
         const { data: job } = await supabase
           .from("jobs")
           .select("order_id")
-          .eq("id", jobId)
+          .eq("job_id", jobId)
           .eq("user_id", user.id)
           .single()
 
-        let paid = false
+        let paid = isPaidFromQuery
         if (job?.order_id) {
           const { data: order } = await supabase
             .from("orders")
@@ -350,22 +464,18 @@ export async function GET(
             .single()
 
           if (order) {
-            paid = order.payment_status === "paid"
+            paid = order.payment_status === "paid" || paid
           }
         }
 
         const results = await provider.getResults(jobId, { paid })
-        
-        // 计算品质分数（非 Mock 模式）
+
         const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
         const qualityScores = calculateQualityScores(forceLowQuality)
         const needsVoucher = shouldIssueVoucher(qualityScores)
 
         if (needsVoucher && user) {
-          // 发放重生成券
           const voucher = generateVoucher(jobId, user.id)
-          
-          // 记录到 analytics_logs
           await logAnalyticsEvent({
             event_type: "voucher_issued",
             job_id: jobId,
@@ -379,7 +489,6 @@ export async function GET(
           })
         }
 
-        // 记录 results_ok 事件
         const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
         await logAnalyticsEvent({
           event_type: "results_ok",
@@ -395,7 +504,6 @@ export async function GET(
           },
         })
 
-        // 记录 preview_view 事件
         await logAnalyticsEvent({
           event_type: "preview_view",
           request_id: requestId,
@@ -408,21 +516,20 @@ export async function GET(
           },
         })
 
-        // Fetch job created_at
         const { data: jobData } = await supabase
           .from("jobs")
           .select("created_at")
-          .eq("id", jobId)
+          .eq("job_id", jobId)
           .single()
 
-        // 轉換 images 格式（ResultsResult.images 是 string[]，但 API 需要 { id, url, thumbnail }[]）
         const formattedImages = results.images.map((url, idx) => ({
-          id: idx,
+          id: idx + 1,
           url,
           thumbnail: url,
         }))
 
         return NextResponse.json({
+          ok: true,
           jobId,
           images: formattedImages,
           paymentStatus: paid ? "paid" : "unpaid",
@@ -431,48 +538,50 @@ export async function GET(
           voucherIssued: needsVoucher,
         })
       } catch (error: any) {
-        console.error("Error in RunwareProvider.getResults:", error)
-        return NextResponse.json({ error: "Failed to fetch results" }, { status: 500 })
+        console.error("[api/results] Error in RunwareProvider.getResults:", error)
+        return NextResponse.json(
+          { ok: false, error: "Failed to fetch results", jobId },
+          { status: 500 }
+        )
       }
     }
 
-    // 其他非 Mock 模式：使用現有邏輯（向後兼容）
-    // Get current user
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    // Fetch job and results from database
+    // 最後的 fallback：直接查詢 Supabase
     const { data: job, error: jobError } = await supabase
       .from("jobs")
-      .select("id, status, created_at, order_id")
-      .eq("id", jobId)
+      .select("job_id, status, created_at, order_id")
+      .eq("job_id", jobId)
       .eq("user_id", user.id)
       .single()
 
     if (jobError || !job) {
-      return NextResponse.json({ error: "Job not found" }, { status: 404 })
+      return NextResponse.json(
+        { ok: false, error: "Job not found", jobId },
+        { status: 404 }
+      )
     }
 
-    // Fetch images for this job
     const { data: images, error: imagesError } = await supabase
       .from("job_images")
-      .select("id, url, thumbnail_url")
+      .select("id, image_url, thumbnail_url")
       .eq("job_id", jobId)
       .order("created_at", { ascending: true })
 
     if (imagesError) {
-      console.error("Error fetching images:", imagesError)
+      console.error(`[api/results] Error fetching images for job ${jobId}:`, {
+        error: imagesError.message,
+        code: imagesError.code,
+      })
+      return NextResponse.json(
+        { ok: false, error: "Failed to fetch images", jobId },
+        { status: 500 }
+      )
     }
 
-    // Fetch payment status from order if exists
-    let paymentStatus = "unpaid"
-    if (job.order_id) {
+    let paymentStatus: "paid" | "unpaid" = "unpaid"
+    if (isPaidFromQuery) {
+      paymentStatus = "paid"
+    } else if (job.order_id) {
       const { data: order } = await supabase
         .from("orders")
         .select("payment_status")
@@ -480,27 +589,16 @@ export async function GET(
         .single()
 
       if (order) {
-        paymentStatus = order.payment_status || "unpaid"
+        paymentStatus = order.payment_status === "paid" ? "paid" : "unpaid"
       }
     }
 
-    // Format images to match API structure: { url }
-    const formattedImages = (images || []).map((img) => ({
-      id: img.id,
-      url: img.url,
-      thumbnail: img.thumbnail_url || img.url,
-    }))
-
-    // 计算品质分数（非 Mock 模式）
     const forceLowQuality = process.env.FORCE_LOW_QUALITY === "true"
     const qualityScores = calculateQualityScores(forceLowQuality)
     const needsVoucher = shouldIssueVoucher(qualityScores)
 
     if (needsVoucher && user) {
-      // 发放重生成券
       const voucher = generateVoucher(jobId, user.id)
-      
-      // 记录到 analytics_logs
       await logAnalyticsEvent({
         event_type: "voucher_issued",
         job_id: jobId,
@@ -514,41 +612,41 @@ export async function GET(
       })
     }
 
-    // 记录 results_ok 事件
     const requestId = `req_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
-    const falApiKey = process.env.FAL_API_KEY
-    const falModelId = process.env.FAL_MODEL_ID || "fal-ai/flux/schnell"
-    const modelProvider = useMock ? "mock" : (falApiKey ? "fal" : "degraded")
-    const modelId = useMock ? null : (falApiKey ? falModelId : null)
-    
     await logAnalyticsEvent({
       event_type: "results_ok",
       request_id: requestId,
       job_id: jobId,
       user_id: user.id,
       data: {
-        image_count: formattedImages.length,
+        image_count: images?.length || 0,
         quality_scores: qualityScores,
         voucher_issued: needsVoucher,
-        model_provider: modelProvider,
-        model_id: modelId,
+        model_provider: "unknown",
+        model_id: null,
       },
     })
 
-    // 记录 preview_view 事件
     await logAnalyticsEvent({
       event_type: "preview_view",
       request_id: requestId,
       job_id: jobId,
       user_id: user.id,
       data: {
-        image_count: formattedImages.length,
+        image_count: images?.length || 0,
         preview_size: 1024,
         has_watermark: paymentStatus !== "paid",
       },
     })
 
+    const formattedImages = (images || []).map((img, idx) => ({
+      id: idx + 1,
+      url: img.image_url, // 使用正確的欄位名稱
+      thumbnail: img.thumbnail_url || img.image_url, // thumbnail_url 為 null 時 fallback
+    }))
+
     return NextResponse.json({
+      ok: true,
       jobId,
       images: formattedImages,
       paymentStatus,
@@ -556,17 +654,20 @@ export async function GET(
       qualityScores,
       voucherIssued: needsVoucher,
     })
-  } catch (error) {
-    console.error("Error in results API:", error)
+  } catch (error: any) {
+    console.error("[api/results] Unexpected error in results API:", {
+      error: error.message,
+      stack: error.stack,
+    })
     return NextResponse.json(
-      { error: "Failed to fetch results" },
+      { ok: false, error: "Internal server error" },
       { status: 500 }
     )
   }
 }
 
 /**
- * 记录 analytics_logs 事件
+ * 記錄 analytics_logs 事件
  */
 async function logAnalyticsEvent(event: {
   event_type: string
@@ -599,6 +700,7 @@ async function logAnalyticsEvent(event: {
     })
   } catch (error) {
     console.error("Failed to log analytics event:", error)
-    // 不抛出错误，避免影响主流程
+    // 不拋出錯誤，避免影響主流程
   }
 }
+

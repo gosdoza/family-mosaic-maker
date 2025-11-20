@@ -21,13 +21,67 @@ type ResultImage = { id: number | string; url: string; thumbnail: string }
 interface ResultsResponse {
   jobId: string
   images: ResultImage[]
-  paymentStatus: "paid" | "unpaid"
+  paymentStatus: "paid" | "unpaid" | "free"
   createdAt: string
   qualityScores?: {
     clip: number
     brisque: number
   }
   voucherIssued?: boolean
+  provider?: "mock" | "runware"
+  isMock?: boolean
+  identityMode?: boolean
+}
+
+/**
+ * 浮水印組件
+ * 
+ * 顯示條件：
+ * - paymentStatus !== "paid" 或 isMock === true 時顯示斜向多行文字浮水印
+ * - paymentStatus === "paid" 時只顯示右下角小 logo
+ */
+function WatermarkOverlay({ isPaid, isMock }: { isPaid: boolean; isMock?: boolean }) {
+  // 已付款且非 mock：右下角小 logo
+  if (isPaid && !isMock) {
+    return (
+      <div className="absolute bottom-4 right-4 pointer-events-none z-10">
+        <div className="px-3 py-1.5 bg-black/30 backdrop-blur-sm rounded-md border border-white/10">
+          <span className="text-xs font-medium text-white/70 select-none">
+            FAMILY MOSAIC MAKER
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  // 未付款或 mock：斜向多行文字浮水印（透明度 0.2，讓使用者可以清楚看到圖片）
+  return (
+    <div className="absolute inset-0 pointer-events-none z-10 overflow-hidden">
+      {/* 多行斜向浮水印文字 */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="relative w-full h-full">
+          {/* 第一行 */}
+          <div className="absolute top-1/4 left-1/4 transform -translate-x-1/2 -translate-y-1/2 -rotate-12 opacity-20">
+            <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-white select-none whitespace-nowrap">
+              FAMILY MOSAIC MAKER
+            </span>
+          </div>
+          {/* 第二行 */}
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 -rotate-12 opacity-20">
+            <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-white select-none whitespace-nowrap">
+              PREVIEW
+            </span>
+          </div>
+          {/* 第三行 */}
+          <div className="absolute top-3/4 left-3/4 transform -translate-x-1/2 -translate-y-1/2 -rotate-12 opacity-20">
+            <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-white select-none whitespace-nowrap">
+              FAMILY MOSAIC MAKER
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 function ResultsContent() {
@@ -36,10 +90,8 @@ function ResultsContent() {
   const router = useRouter()
   const fallbackId = searchParams.get("id") || "demo-001"
   const id = params?.id || fallbackId
-  // Route A: demo-001 免登录放行，其他 jobId 需要登录
-  // NOTE: behavior preserved, just using centralized feature flags
   const isDemo = isDemoJob(id)
-  const { user, loading: authLoading } = useAuth(!isDemo) // demo-001 不 redirect，其他需要登录
+  const { user, loading: authLoading } = useAuth(!isDemo)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -48,7 +100,6 @@ function ResultsContent() {
   const [downloadingId, setDownloadingId] = useState<number | string | null>(null)
   const { toast } = useToast()
 
-  // 單一資料來源：/api/results/:id
   useEffect(() => {
     let abort = false
 
@@ -63,7 +114,6 @@ function ResultsContent() {
         setLoading(true)
         setError(null)
 
-        // 檢查 URL 是否有 paid=1 參數，如果有則傳遞給 API
         const paidParam = searchParams.get("paid")
         const apiUrl = paidParam 
           ? `/api/results/${id}?paid=${paidParam}`
@@ -81,8 +131,6 @@ function ResultsContent() {
         if (abort) return
 
         setResults(data)
-        // 關鍵：只信 paymentStatus
-        // isPaid 從 results.paymentStatus 推導，不需要額外的 state
         trackMetric({ event: "generate_succeeded", jobId: id })
       } catch (e: any) {
         if (!abort) {
@@ -100,9 +148,13 @@ function ResultsContent() {
     }
   }, [id, searchParams])
 
-  // Route C: 统一 isPaid 判断（来自 paymentStatus + query param）
   const isPaidQuery = searchParams.get("paid") === "1" || searchParams.get("paid") === "true"
   const isPaid = results?.paymentStatus === "paid" || isPaidQuery
+
+  // 主圖片（第一張生成圖）
+  const mainImage = results?.images?.[0]
+  // 其他圖片（從第二張開始）
+  const otherImages = results?.images?.slice(1) || []
 
   const handleDownloadHD = async (imageId: number | string) => {
     if (!isPaid) {
@@ -125,7 +177,6 @@ function ResultsContent() {
 
     setDownloadingId(imageId)
     try {
-      // Trigger download via API route
       window.location.href = `/api/download?job=${id}&i=${imageId}`
       toast({
         title: "Download Started",
@@ -153,7 +204,6 @@ function ResultsContent() {
         })
         .catch((error) => console.error("Error sharing:", error))
     } else {
-      // Fallback for browsers that don't support Web Share API
       navigator.clipboard
         .writeText(window.location.href)
         .then(() => {
@@ -195,7 +245,7 @@ function ResultsContent() {
     )
   }
 
-  if (!results || results.images.length === 0) {
+  if (!results) {
     return (
       <div className="min-h-screen flex flex-col">
         <Navigation />
@@ -220,8 +270,8 @@ function ResultsContent() {
       >
         <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-accent/5 to-primary/5 gradient-animate" />
 
-        <div className="container relative z-10 mx-auto px-4 sm:px-6 lg:px-8 max-w-6xl">
-          <div className="text-center mb-12">
+        <div className="container relative z-10 mx-auto px-4 sm:px-6 lg:px-8 max-w-7xl">
+          <div className="text-center mb-8">
             <h1 className="text-4xl font-extrabold tracking-tight sm:text-5xl lg:text-6xl text-transparent bg-clip-text bg-gradient-to-r from-primary to-accent">
               Your Family Mosaic is Ready!
             </h1>
@@ -231,6 +281,16 @@ function ResultsContent() {
             {isDemo && (
               <p className="mt-2 text-xs text-muted-foreground">
                 This is a mock demo result (jobId: demo-001).
+              </p>
+            )}
+            {results.provider === "runware" && !results.isMock && (
+              <p className="mt-2 text-xs text-blue-400">
+                ✨ 來自真實 AI 生成（Runware）
+              </p>
+            )}
+            {results.provider === "runware" && results.identityMode && (
+              <p className="mt-2 text-xs text-purple-400 font-medium">
+                ✨ AI Family Portrait (Identity Mode) - 保留人物樣貌
               </p>
             )}
             {isPaid ? (
@@ -282,87 +342,157 @@ function ResultsContent() {
             )}
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {results.images.map((image, index) => (
-              <Card
-                key={image.id || index}
-                className="group relative overflow-hidden rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 glass"
-                onMouseEnter={() => setHoveredId(image.id as number)}
-                onMouseLeave={() => setHoveredId(null)}
-              >
-                <AspectRatio ratio={1}>
+          {/* 主圖片區域：大尺寸顯示，讓生成圖成為主角 */}
+          {mainImage && (
+            <div className="mb-8">
+              <Card className="relative overflow-hidden rounded-xl shadow-2xl glass">
+                <div className="relative w-full" style={{ maxHeight: "70vh", minHeight: "400px" }}>
                   <Image
-                    src={image.url}
-                    alt={`Generated image ${image.id || index + 1}`}
-                    fill
-                    className={`object-cover transition-transform duration-300 ${
-                      hoveredId === image.id ? "scale-105" : "scale-100"
-                    }`}
-                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
-                    priority={index < 3}
+                    src={mainImage.url}
+                    alt={`Generated image ${mainImage.id}`}
+                    width={1200}
+                    height={1200}
+                    className="w-full h-full object-contain"
+                    style={{ maxHeight: "70vh" }}
+                    sizes="(max-width: 768px) 100vw, (max-width: 1200px) 90vw, 1200px"
+                    priority
                   />
-                  {!isPaid && (
-                    <>
-                      <div className="absolute inset-0 bg-black/20 pointer-events-none" />
-                    <div
-                      data-testid="watermark-overlay"
-                      className="absolute inset-0 flex items-center justify-center bg-black/50 backdrop-blur-sm pointer-events-none"
-                    >
-                      <span className="rotate-[-20deg] opacity-30 text-4xl font-bold select-none text-white">
-                        PREVIEW
-                      </span>
+                  {/* 浮水印覆蓋層 */}
+                  <WatermarkOverlay isPaid={isPaid} isMock={results.isMock} />
+                  {/* 操作按鈕（hover 時顯示） */}
+                  <div className="absolute inset-0 flex flex-col justify-end p-4 bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 hover:opacity-100 transition-opacity duration-300">
+                    <div className="flex gap-2">
+                      <Button
+                        className="flex-1 rounded-full"
+                        size="sm"
+                        onClick={() => handleDownloadHD(mainImage.id)}
+                        disabled={!isPaid || downloadingId === mainImage.id}
+                        aria-disabled={!isPaid || downloadingId === mainImage.id}
+                        aria-label={
+                          downloadingId === mainImage.id
+                            ? "Downloading image"
+                            : isPaid
+                            ? "Download HD image"
+                            : "Download HD - Requires premium upgrade"
+                        }
+                        data-testid="btn-download-hd"
+                      >
+                        {downloadingId === mainImage.id ? (
+                          <>
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+                            <span>Downloading...</span>
+                          </>
+                        ) : isPaid ? (
+                          <>
+                            <Download className="w-4 h-4 mr-2" aria-hidden="true" />
+                            <span>Download HD</span>
+                          </>
+                        ) : (
+                          <>
+                            <Lock className="w-4 h-4 mr-2" aria-hidden="true" />
+                            <span>Download HD</span>
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="rounded-full"
+                        onClick={() => handleShare(mainImage)}
+                        aria-label="Share image"
+                      >
+                        <Share2 className="w-4 h-4" aria-hidden="true" />
+                      </Button>
                     </div>
-                    </>
-                  )}
-                </AspectRatio>
-                <div className="absolute inset-0 flex flex-col justify-end p-4 bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
-                  <div className="flex gap-2">
-                    <Button
-                      className="flex-1 rounded-full"
-                      size="sm"
-                      onClick={() => handleDownloadHD(image.id)}
-                      disabled={!isPaid || downloadingId === image.id}
-                      aria-disabled={!isPaid || downloadingId === image.id}
-                      aria-label={
-                        downloadingId === image.id
-                          ? "Downloading image"
-                          : isPaid
-                          ? "Download HD image"
-                          : "Download HD - Requires premium upgrade"
-                      }
-                      data-testid="btn-download-hd"
-                    >
-                      {downloadingId === image.id ? (
-                        <>
-                          <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
-                          <span>Downloading...</span>
-                        </>
-                      ) : isPaid ? (
-                        <>
-                          <Download className="w-4 h-4 mr-2" aria-hidden="true" />
-                          <span>Download HD</span>
-                        </>
-                      ) : (
-                        <>
-                          <Lock className="w-4 h-4 mr-2" aria-hidden="true" />
-                          <span>Download HD</span>
-                        </>
-                      )}
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="rounded-full"
-                      onClick={() => handleShare(image)}
-                      aria-label="Share image"
-                    >
-                      <Share2 className="w-4 h-4" aria-hidden="true" />
-                    </Button>
                   </div>
                 </div>
               </Card>
-            ))}
-          </div>
+            </div>
+          )}
+
+          {/* 其他圖片：小卡片網格（如果有多張圖片） */}
+          {otherImages.length > 0 && (
+            <div className="mt-8">
+              <h2 className="text-2xl font-bold mb-4 text-center">More Variations</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+                {otherImages.map((image, index) => (
+                  <Card
+                    key={image.id || index + 2}
+                    className="group relative overflow-hidden rounded-xl shadow-lg hover:shadow-xl transition-all duration-300 glass"
+                    onMouseEnter={() => setHoveredId(image.id as number)}
+                    onMouseLeave={() => setHoveredId(null)}
+                  >
+                    <AspectRatio ratio={1}>
+                      <Image
+                        src={image.url}
+                        alt={`Generated image ${image.id || index + 2}`}
+                        fill
+                        className={`object-cover transition-transform duration-300 ${
+                          hoveredId === image.id ? "scale-105" : "scale-100"
+                        }`}
+                        sizes="(max-width: 768px) 100vw, (max-width: 1200px) 50vw, 33vw"
+                      />
+                      {/* 浮水印覆蓋層 */}
+                      <WatermarkOverlay isPaid={isPaid} isMock={results.isMock} />
+                      {/* 操作按鈕（hover 時顯示） */}
+                      <div className="absolute inset-0 flex flex-col justify-end p-4 bg-gradient-to-t from-black/70 via-black/30 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                        <div className="flex gap-2">
+                          <Button
+                            className="flex-1 rounded-full"
+                            size="sm"
+                            onClick={() => handleDownloadHD(image.id)}
+                            disabled={!isPaid || downloadingId === image.id}
+                            aria-disabled={!isPaid || downloadingId === image.id}
+                            aria-label={
+                              downloadingId === image.id
+                                ? "Downloading image"
+                                : isPaid
+                                ? "Download HD image"
+                                : "Download HD - Requires premium upgrade"
+                            }
+                            data-testid="btn-download-hd"
+                          >
+                            {downloadingId === image.id ? (
+                              <>
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" aria-hidden="true" />
+                                <span>Downloading...</span>
+                              </>
+                            ) : isPaid ? (
+                              <>
+                                <Download className="w-4 h-4 mr-2" aria-hidden="true" />
+                                <span>Download HD</span>
+                              </>
+                            ) : (
+                              <>
+                                <Lock className="w-4 h-4 mr-2" aria-hidden="true" />
+                                <span>Download HD</span>
+                              </>
+                            )}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="rounded-full"
+                            onClick={() => handleShare(image)}
+                            aria-label="Share image"
+                          >
+                            <Share2 className="w-4 h-4" aria-hidden="true" />
+                          </Button>
+                        </div>
+                      </div>
+                    </AspectRatio>
+                  </Card>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 如果只有一張圖片，不顯示 "More Variations" */}
+          {results.images.length === 0 && (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No images available for this job.</p>
+            </div>
+          )}
         </div>
       </main>
       <Footer />
